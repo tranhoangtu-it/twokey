@@ -34,20 +34,24 @@ var errHeld = errors.New("held")
 const usage = `twokey ` + version + ` — make your AI agent ask a human before it deletes prod
 
 Usage:
-  twokey up [--addr A] [--timeout 2m] [--ntfy-topic T]   start the proxy + approval prompt
-  twokey run [--addr A] -- <agent> [args...]           run an agent routed through twokey
+  twokey replay pocketos                               see what twokey does, in 5 seconds
+  twokey up [--phone] [--timeout 2m]                   start the proxy + approval prompt
+  twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
+  twokey phone [--rotate]                              set up approvals on your phone (ntfy)
   twokey env [--shell sh|powershell]                   print the variables 'run' sets
   twokey doctor [--addr A]                             check curl/python/node/go are covered
   twokey replay <scenario> [--live]                    replay a real-world incident
   twokey explain --method M --url U [-H k:v] [--data D] would this request be held?
   twokey rules [--rules DIR]                           list destructive-operation rules
   twokey ca init|path|trust|reset                      manage the local CA
-  twokey ntfy-topic                                    generate a private phone topic
   twokey version
 
-Typical use (two terminals):
-  1) twokey up --ntfy-topic "$(twokey ntfy-topic)"
-  2) twokey run -- claude
+Typical use:
+  two terminals:  1) twokey up --phone     2) twokey run -- claude
+  one terminal:   twokey run --phone -- claude      (approve on your phone)
+
+Exit codes: 2 = explain would hold; 125 = twokey itself failed in run;
+otherwise run exits with the agent's status.
 `
 
 func main() {
@@ -94,9 +98,8 @@ func dispatch(args []string) error {
 		return cmdRules(rest)
 	case "ca":
 		return cmdCA(rest)
-	case "ntfy-topic":
-		fmt.Println("twokey-" + randomHex(12))
-		return nil
+	case "phone":
+		return cmdPhone(rest)
 	case "version", "--version", "-v":
 		fmt.Println("twokey", version)
 		return nil
@@ -267,6 +270,19 @@ func cmdCA(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: twokey ca init|path|trust|reset")
 	}
+	if args[0] == "path" {
+		// Report only; never create a CA (key material) as a side effect.
+		home, err := homeDir()
+		if err != nil {
+			return err
+		}
+		p := filepath.Join(home, "ca.pem")
+		if _, err := os.Stat(p); err != nil {
+			return fmt.Errorf("no CA yet at %s (created by `twokey up` or `twokey ca init`)", p)
+		}
+		fmt.Println(p)
+		return nil
+	}
 	if args[0] == "reset" {
 		home, err := homeDir()
 		if err != nil {
@@ -376,13 +392,20 @@ func cmdReplay(args []string) error {
 	if name == "" && fs.NArg() > 0 {
 		name = fs.Arg(0)
 	}
+	names := make([]string, 0, len(scenarios))
+	for n := range scenarios {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	if name == "" {
+		fmt.Println("usage: twokey replay <scenario> [--live]\n\nscenarios:")
+		for _, n := range names {
+			fmt.Printf("  %-20s %s\n", n, strings.SplitN(scenarios[n].story, "\n", 2)[0])
+		}
+		return nil
+	}
 	sc, ok := scenarios[name]
 	if !ok {
-		names := make([]string, 0, len(scenarios))
-		for n := range scenarios {
-			names = append(names, n)
-		}
-		sort.Strings(names)
 		return fmt.Errorf("unknown scenario %q; available: %s", name, strings.Join(names, ", "))
 	}
 	fmt.Printf("── replay: %s ──\n%s\n\n", name, sc.story)

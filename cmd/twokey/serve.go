@@ -19,8 +19,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tranhoangtu-it/twokey/internal/approval"
-	"github.com/tranhoangtu-it/twokey/internal/audit"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
 	"github.com/tranhoangtu-it/twokey/internal/runenv"
 )
@@ -32,84 +30,24 @@ func cmdUp(args []string) error {
 	addr := fs.String("addr", defaultAddr, "listen address (loopback only)")
 	timeout := fs.Duration("timeout", 2*time.Minute, "deny holds nobody answers within this time")
 	rulesDir := fs.String("rules", "", "extra rule pack directory")
-	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "ntfy topic for phone approvals (see `twokey ntfy-topic`)")
+	phone := fs.Bool("phone", false, "also approve from your phone (see `twokey phone`)")
+	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic (default: the one from `twokey phone`)")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := requireLoopback(*addr); err != nil {
-		return err
-	}
-
-	engine, err := loadEngine(*rulesDir)
-	if err != nil {
-		return err
-	}
-	authority, _, err := loadAuthority(engine)
-	if err != nil {
-		return err
-	}
-	if _, err := authority.EnsureBundle(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not build CA bundle (%v); Python/curl may reject intercepted hosts\n", err)
-	}
-	auditLog, err := audit.Open(filepath.Join(authority.Dir(), "audit.jsonl"))
-	if err != nil {
-		return err
-	}
-	defer auditLog.Close()
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	broker := approval.NewBroker(*timeout)
-	term := approval.NewTerminal(broker, os.Stdout)
-	broker.AddNotifier(term)
-	phone := "off (add --ntfy-topic to approve from your phone)"
-	if *ntfyTopic != "" {
-		if len(*ntfyTopic) < 16 {
-			fmt.Fprintln(os.Stderr, "warning: short ntfy topics are guessable; use `twokey ntfy-topic`")
-		}
-		n := approval.NewNtfy(*ntfyServer, *ntfyTopic, broker)
-		broker.AddNotifier(n)
-		go n.Listen(ctx)
-		phone = fmt.Sprintf("subscribe to %q on %s in the ntfy app", *ntfyTopic, *ntfyServer)
-	}
-
-	ln, err := net.Listen("tcp", *addr)
+	p, err := startProxy(ctx, proxyConfig{
+		addr: *addr, timeout: *timeout, rulesDir: *rulesDir, phone: *phone,
+		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr,
+	})
 	if err != nil {
-		return fmt.Errorf("listen on %s (is twokey already running?): %w", *addr, err)
-	}
-	srv := &http.Server{
-		Handler: proxy.New(proxy.Options{
-			Engine: engine, CA: authority, Broker: broker, Audit: auditLog, Version: version,
-		}),
-		ReadHeaderTimeout: 30 * time.Second,
-	}
-	go func() {
-		<-ctx.Done()
-		_ = srv.Close()
-	}()
-
-	ruleList := engine.Rules()
-	providers := map[string]bool{}
-	for _, r := range ruleList {
-		providers[r.Provider()] = true
-	}
-	fmt.Printf(`twokey %s — proxy on http://%s
-  rules    %d destructive operations across %d providers (only those hosts are inspected)
-  approve  here: type "approve <id> <resource>" or "deny <id>"
-  phone    %s
-  timeout  unanswered holds are denied after %s
-  audit    %s
-
-Now, in another terminal:  twokey run -- claude     (or codex, cursor-agent, aider, ...)
-`, version, *addr, len(ruleList), len(providers), phone, *timeout, filepath.Join(authority.Dir(), "audit.jsonl"))
-
-	go term.Run(os.Stdin)
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
-	return nil
+	fmt.Printf("twokey %s — proxy on http://%s\n%s\nNow, in another terminal:  twokey run -- claude     (or codex, cursor-agent, aider, ...)\n",
+		version, p.addr, p.summary)
+	return <-p.done
 }
 
 // requireLoopback refuses to become an open proxy on the network.
@@ -136,8 +74,10 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 	}
 	bundle := a.BundlePath()
 	if _, err := os.Stat(bundle); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: no CA bundle yet; run `twokey ca init` (Python/curl trust)")
-		bundle = ""
+		if bundle, err = a.EnsureBundle(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: no CA bundle (%v); Python/curl may reject intercepted hosts\n", err)
+			bundle = ""
+		}
 	}
 	if old := runenv.Lookup(os.Environ(), "NO_PROXY"); old != "" {
 		fmt.Fprintf(os.Stderr, "twokey: ignoring NO_PROXY=%q so watched hosts cannot bypass the proxy\n", old)
@@ -149,33 +89,65 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	addr := fs.String("addr", defaultAddr, "address of `twokey up`")
+	phone := fs.Bool("phone", false, "one-terminal mode: start the proxy in-process, approve on your phone")
+	timeout := fs.Duration("timeout", 2*time.Minute, "with --phone: deny holds nobody answers within this time")
+	rulesDir := fs.String("rules", "", "with --phone: extra rule pack directory")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	argv := fs.Args()
 	if len(argv) == 0 {
-		return errors.New("usage: twokey run [--addr A] -- <agent> [args...]")
+		return errors.New("usage: twokey run [--addr A | --phone] -- <agent> [args...]")
 	}
-	if err := checkHealth(*addr); err != nil {
-		return fmt.Errorf("twokey proxy is not reachable at %s (%v)\nstart it first in another terminal:  twokey up", *addr, err)
+
+	proxyAddr := *addr
+	if *phone {
+		home, err := homeDir()
+		if err != nil {
+			return setupFailure(err)
+		}
+		logFile, err := os.OpenFile(filepath.Join(home, "twokey.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return setupFailure(err)
+		}
+		defer logFile.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		p, err := startProxy(ctx, proxyConfig{
+			addr: "127.0.0.1:0", timeout: *timeout, rulesDir: *rulesDir, phone: true,
+			ntfyTopic: os.Getenv("TWOKEY_NTFY_TOPIC"), ntfyServer: envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"),
+			logTo: logFile, // keep diagnostics out of the agent's TUI
+		})
+		if err != nil {
+			return setupFailure(err)
+		}
+		proxyAddr = p.addr
+		fmt.Fprintf(os.Stderr, "twokey %s (one-terminal mode, log: %s)\n%s", version, logFile.Name(), p.summary)
+	} else if err := checkHealth(proxyAddr); err != nil {
+		return setupFailure(fmt.Errorf("%v\nStart the proxy first in another terminal:  twokey up\n"+
+			"or use one terminal with phone approvals:   twokey run --phone -- %s", err, argv[0]))
 	}
-	vars, err := agentEnv(*addr)
+
+	vars, err := agentEnv(proxyAddr)
 	if err != nil {
-		return err
+		return setupFailure(err)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = runenv.Apply(os.Environ(), vars)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — destructive cloud API calls need your approval\n", argv[0], *addr)
+	fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — destructive cloud API calls need your approval\n", argv[0], proxyAddr)
 
 	// Ctrl+C belongs to the agent; twokey just waits for it to exit.
 	signal.Notify(make(chan os.Signal, 1), os.Interrupt)
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			return exitCode(ee.ExitCode())
+			if code := ee.ExitCode(); code > 0 {
+				return exitCode(code)
+			}
+			return exitCode(1) // killed by a signal: ExitCode() is -1
 		}
-		return err
+		return setupFailure(fmt.Errorf("start %s: %w", argv[0], err))
 	}
 	return nil
 }
@@ -210,7 +182,7 @@ func checkHealth(addr string) error {
 	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	resp, err := client.Get("http://" + addr + proxy.HealthPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("nothing is listening on %s", addr)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))

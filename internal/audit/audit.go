@@ -3,6 +3,7 @@ package audit
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -26,8 +27,9 @@ type Entry struct {
 
 // Log is an append-only JSONL file. A nil *Log discards entries.
 type Log struct {
-	mu sync.Mutex
-	f  *os.File
+	mu     sync.Mutex
+	f      *os.File
+	closed bool
 }
 
 // Open opens (or creates) path for appending.
@@ -53,14 +55,24 @@ func (l *Log) Write(e Entry) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return errors.New("audit log closed")
+	}
 	_, err = l.f.Write(append(line, '\n'))
 	return err
 }
 
-// Close closes the underlying file.
+// Close closes the underlying file; later writes return an error instead
+// of racing with the close during shutdown.
 func (l *Log) Close() error {
 	if l == nil {
 		return nil
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return nil
+	}
+	l.closed = true
 	return l.f.Close()
 }

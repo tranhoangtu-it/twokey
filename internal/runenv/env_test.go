@@ -27,6 +27,19 @@ func TestApplyOverridesCaseInsensitivelyAndDropsUserNoProxy(t *testing.T) {
 	}
 }
 
+func TestApprovalSecretsNeverReachTheAgent(t *testing.T) {
+	base := []string{"TWOKEY_NTFY_TOPIC=twokey-secret", "twokey_ntfy_server=https://x", "TWOKEY_HOME=/h"}
+	env := Apply(base, Vars(Config{ProxyURL: "http://p"}))
+	for _, e := range env {
+		if strings.Contains(strings.ToUpper(e), "TWOKEY_NTFY") {
+			t.Fatalf("approval secret leaked into agent env: %q", e)
+		}
+	}
+	if Lookup(env, "TWOKEY_HOME") != "/h" {
+		t.Fatal("non-secret twokey settings should be kept")
+	}
+}
+
 func TestVarsWithoutBundleSkipsReplacingTrustStores(t *testing.T) {
 	for _, kv := range Vars(Config{ProxyURL: "http://x", CACert: "/ca.pem"}) {
 		if kv.Key == "SSL_CERT_FILE" {

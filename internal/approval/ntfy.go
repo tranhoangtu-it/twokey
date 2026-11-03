@@ -42,6 +42,9 @@ func NewNtfy(server, topic string, b *Broker) *Ntfy {
 
 const publishTimeout = 15 * time.Second
 
+// SetLogf redirects diagnostics (e.g. away from an agent's TUI).
+func (n *Ntfy) SetLogf(f func(string, ...any)) { n.logf = f }
+
 func (n *Ntfy) replyTopic() string { return n.topic + "-reply" }
 
 type ntfyAction struct {

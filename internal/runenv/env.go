@@ -17,6 +17,9 @@ type Config struct {
 // KV is one environment variable.
 type KV struct{ Key, Value string }
 
+// secretPrefix marks variables that belong to the approver, not the agent.
+const secretPrefix = "TWOKEY_NTFY_"
+
 // localBypass keeps local traffic (dev servers, the proxy itself) direct.
 const localBypass = "localhost,127.0.0.1,::1"
 
@@ -59,9 +62,13 @@ func Apply(base []string, vars []KV) []string {
 	out := make([]string, 0, len(base)+len(vars))
 	for _, e := range base {
 		k, _, _ := strings.Cut(e, "=")
-		if !override[strings.ToUpper(k)] {
-			out = append(out, e)
+		upper := strings.ToUpper(k)
+		// The phone-approval topic is the approval secret: the agent must
+		// never see it, or it could approve its own requests.
+		if override[upper] || strings.HasPrefix(upper, secretPrefix) {
+			continue
 		}
+		out = append(out, e)
 	}
 	for _, kv := range vars {
 		out = append(out, kv.Key+"="+kv.Value)
