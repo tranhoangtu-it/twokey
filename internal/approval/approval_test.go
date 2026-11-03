@@ -26,7 +26,10 @@ func (r *recorder) Closed(Request, Decision) {}
 
 func decideAsync(b *Broker) <-chan Decision {
 	out := make(chan Decision, 1)
-	go func() { out <- b.Decide(context.Background(), Request{Method: "POST", URL: "https://x", Matches: volumeDelete}) }()
+	go func() {
+		_, d := b.Decide(context.Background(), Request{Method: "POST", URL: "https://x", Matches: volumeDelete})
+		out <- d
+	}()
 	return out
 }
 
@@ -132,7 +135,7 @@ func TestNtfyRoundTrip(t *testing.T) {
 	defer cancel()
 	go n.Listen(ctx)
 
-	d := b.Decide(ctx, Request{Method: "POST", URL: "https://backboard.railway.com/graphql/v2", Matches: volumeDelete})
+	_, d := b.Decide(ctx, Request{Method: "POST", URL: "https://backboard.railway.com/graphql/v2", Matches: volumeDelete})
 	if !d.Approved || d.By != "ntfy" {
 		t.Fatalf("want ntfy approval, got %+v", d)
 	}

@@ -101,7 +101,8 @@ func (b *Broker) AddNotifier(n Notifier) {
 }
 
 // Decide blocks until the request is approved, denied, times out, or ctx ends.
-func (b *Broker) Decide(ctx context.Context, req Request) Decision {
+// It returns the request as registered (with ID and timestamps) and the outcome.
+func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	req.ID = strconv.FormatUint(b.seq.Add(1), 10)
 	req.Nonce = randomNonce()
 	req.Created = time.Now()
@@ -129,7 +130,7 @@ func (b *Broker) Decide(ctx context.Context, req Request) Decision {
 	for _, n := range notifiers {
 		go n.Closed(req, d)
 	}
-	return d
+	return req, d
 }
 
 // expire removes e unless a decision raced in, which then wins.

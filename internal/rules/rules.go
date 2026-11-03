@@ -162,6 +162,18 @@ func (e *Engine) HostWatched(host string) bool {
 	return false
 }
 
+// NeedsBody reports whether evaluating requests to host requires the request
+// body (GraphQL or AWS rules). Path-only hosts can stream large uploads.
+func (e *Engine) NeedsBody(host string) bool {
+	h := normalizeHost(host)
+	for _, r := range e.rules {
+		if (r.GraphQL != nil || r.AWS != nil) && r.matchHost(h) {
+			return true
+		}
+	}
+	return false
+}
+
 // Evaluate returns every rule that fires for req.
 func (e *Engine) Evaluate(req Request) Verdict {
 	host := normalizeHost(req.Host)
