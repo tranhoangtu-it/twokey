@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,31 +40,135 @@ type Authority struct {
 	leaves map[string]*tls.Certificate
 }
 
+const (
+	lockFile     = "ca.lock"
+	lockWait     = 10 * time.Second
+	lockStaleAge = 30 * time.Second
+)
+
 // LoadOrCreate loads the CA from dir, generating a new one if absent.
+// permitted, if given, are the DNS domains a new CA may issue for (X.509
+// name constraints), so a leaked CA key cannot impersonate unrelated sites.
+// An existing constrained CA that does not cover permitted is an error.
 // created reports whether a new CA was written.
-func LoadOrCreate(dir string) (a *Authority, created bool, err error) {
+func LoadOrCreate(dir string, permitted ...string) (a *Authority, created bool, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, false, err
 	}
-	certPEM, certErr := os.ReadFile(filepath.Join(dir, certFile))
-	keyPEM, keyErr := os.ReadFile(filepath.Join(dir, keyFile))
-	if errors.Is(certErr, os.ErrNotExist) && errors.Is(keyErr, os.ErrNotExist) {
-		certPEM, keyPEM, err = generateRoot()
-		if err != nil {
-			return nil, false, err
+	deadline := time.Now().Add(lockWait)
+	for {
+		certPEM, certErr := os.ReadFile(filepath.Join(dir, certFile))
+		keyPEM, keyErr := os.ReadFile(filepath.Join(dir, keyFile))
+		switch {
+		case certErr == nil && keyErr == nil:
+			a, err = parseAuthority(dir, certPEM, keyPEM)
+			if err != nil {
+				return nil, false, err
+			}
+			return a, created, a.covers(permitted)
+		case errors.Is(certErr, os.ErrNotExist) && errors.Is(keyErr, os.ErrNotExist):
+			ok, err := createLocked(dir, permitted)
+			if err != nil {
+				return nil, false, err
+			}
+			created = created || ok
+		case !lockHeld(dir):
+			return nil, false, fmt.Errorf("incomplete CA in %s (run `twokey ca reset`): %v %v", dir, certErr, keyErr)
 		}
-		if err := os.WriteFile(filepath.Join(dir, keyFile), keyPEM, 0o600); err != nil {
-			return nil, false, err
+		if time.Now().After(deadline) {
+			return nil, false, fmt.Errorf("timed out waiting for another twokey process to create the CA in %s", dir)
 		}
-		if err := os.WriteFile(filepath.Join(dir, certFile), certPEM, 0o644); err != nil {
-			return nil, false, err
+		if !created {
+			time.Sleep(50 * time.Millisecond)
 		}
-		created = true
-	} else if certErr != nil || keyErr != nil {
-		return nil, false, fmt.Errorf("incomplete CA in %s (delete it to regenerate): %v %v", dir, certErr, keyErr)
 	}
-	a, err = parseAuthority(dir, certPEM, keyPEM)
-	return a, created, err
+}
+
+// createLocked generates the CA unless another process holds the lock.
+// It reports whether this process wrote the CA.
+func createLocked(dir string, permitted []string) (bool, error) {
+	lock := filepath.Join(dir, lockFile)
+	if info, err := os.Stat(lock); err == nil && time.Since(info.ModTime()) > lockStaleAge {
+		_ = os.Remove(lock) // left behind by a crashed process
+	}
+	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return false, nil // someone else is creating it; caller retries
+	}
+	if err != nil {
+		return false, err
+	}
+	f.Close()
+	defer os.Remove(lock)
+
+	certPEM, keyPEM, err := generateRoot(permitted)
+	if err != nil {
+		return false, err
+	}
+	// Key first, cert last: readers treat "cert exists" as "CA complete".
+	if err := writeFileAtomic(filepath.Join(dir, keyFile), keyPEM, 0o600); err != nil {
+		return false, err
+	}
+	if err := writeFileAtomic(filepath.Join(dir, certFile), certPEM, 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func lockHeld(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, lockFile))
+	return err == nil
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// Reset deletes the CA (and the bundle that embeds it) from dir.
+func Reset(dir string) error {
+	for _, f := range []string{certFile, keyFile, bundleFile, lockFile} {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// covers checks that a name-constrained CA may issue for every domain.
+func (a *Authority) covers(domains []string) error {
+	if len(a.cert.PermittedDNSDomains) == 0 {
+		return nil // unconstrained (or legacy) CA covers everything
+	}
+	for _, d := range domains {
+		if !domainPermitted(d, a.cert.PermittedDNSDomains) {
+			return fmt.Errorf("the twokey CA is not allowed to issue certificates for %q (rules changed); "+
+				"run `twokey ca reset`, then `twokey ca trust` again if you trusted it", d)
+		}
+	}
+	return nil
+}
+
+// Permits reports whether the CA may issue a certificate for host.
+func (a *Authority) Permits(host string) bool {
+	if net.ParseIP(host) != nil || len(a.cert.PermittedDNSDomains) == 0 {
+		return true
+	}
+	return domainPermitted(host, a.cert.PermittedDNSDomains)
+}
+
+func domainPermitted(host string, permitted []string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, p := range permitted {
+		p = strings.ToLower(p)
+		if host == p || strings.HasSuffix(host, "."+p) {
+			return true
+		}
+	}
+	return false
 }
 
 // CertPath is the PEM file to hand to clients (e.g. NODE_EXTRA_CA_CERTS).
@@ -81,6 +186,9 @@ func (a *Authority) LeafFor(host string) (*tls.Certificate, error) {
 	defer a.mu.Unlock()
 	if c, ok := a.leaves[host]; ok && time.Until(c.Leaf.NotAfter) > time.Hour {
 		return c, nil
+	}
+	if !a.Permits(host) {
+		return nil, fmt.Errorf("host %q is outside the CA's name constraints; run `twokey ca reset`", host)
 	}
 	serial, err := randomSerial()
 	if err != nil {
@@ -137,7 +245,7 @@ func parseAuthority(dir string, certPEM, keyPEM []byte) (*Authority, error) {
 	}, nil
 }
 
-func generateRoot() (certPEM, keyPEM []byte, err error) {
+func generateRoot(permitted []string) (certPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
@@ -157,6 +265,10 @@ func generateRoot() (certPEM, keyPEM []byte, err error) {
 		BasicConstraintsValid: true,
 		MaxPathLenZero:        true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	if len(permitted) > 0 {
+		tpl.PermittedDNSDomains = permitted
+		tpl.PermittedDNSDomainsCritical = true
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
 	if err != nil {

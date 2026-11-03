@@ -45,7 +45,7 @@ func cmdUp(args []string) error {
 	if err != nil {
 		return err
 	}
-	authority, _, err := loadAuthority()
+	authority, _, err := loadAuthority(engine)
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func requireLoopback(addr string) error {
 // ---- run / env -------------------------------------------------------------------
 
 func agentEnv(addr string) ([]runenv.KV, error) {
-	a, _, err := loadAuthority()
+	a, _, err := loadAuthority(nil)
 	if err != nil {
 		return nil, err
 	}

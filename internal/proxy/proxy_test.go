@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"bufio"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,15 +21,22 @@ import (
 	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
 
-// autoDecider plays the human: approves or denies every hold immediately.
+// autoDecider plays the human: approves or denies every hold immediately,
+// or (manual mode) hands the hold to the test via the held channel.
 type autoDecider struct {
 	broker  *approval.Broker
 	approve atomic.Bool
+	manual  atomic.Bool
 	holds   atomic.Int32
+	held    chan approval.Request
 }
 
 func (a *autoDecider) Notify(r approval.Request) {
 	a.holds.Add(1)
+	if a.manual.Load() {
+		a.held <- r
+		return
+	}
 	a.broker.Resolve(r.ID, approval.Decision{Approved: a.approve.Load(), By: "test", Reason: "auto"})
 }
 func (a *autoDecider) Closed(approval.Request, approval.Decision) {}
@@ -37,7 +46,41 @@ type harness struct {
 	upstreamHits atomic.Int32
 	proxyURL     *url.URL
 	decider      *autoDecider
+	broker       *approval.Broker
 	roots        *x509.CertPool
+}
+
+// rawTLS opens CONNECT + TLS through the proxy by hand, like an agent's
+// HTTP client would, and returns the encrypted stream to the upstream.
+func (h *harness) rawTLS(t *testing.T) (*tls.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := net.Dial("tcp", h.proxyURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := h.upstream.Listener.Addr().String()
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("CONNECT failed: %v %v", err, resp)
+	}
+	tc := tls.Client(conn, &tls.Config{RootCAs: h.roots, ServerName: "127.0.0.1"})
+	if err := tc.Handshake(); err != nil {
+		t.Fatalf("TLS through proxy: %v", err)
+	}
+	t.Cleanup(func() { tc.Close() })
+	return tc, bufio.NewReader(tc)
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 const testPack = `
@@ -62,8 +105,20 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{}
 	h.upstream = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.upstreamHits.Add(1)
+		if r.Header.Get("Upgrade") == "websocket" {
+			conn, buf, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+			_, _ = io.Copy(conn, buf) // echo
+			return
+		}
+		_, _ = io.ReadAll(r.Body)
 		_, _ = io.WriteString(w, "upstream says hi")
 	}))
+	h.upstream.EnableHTTP2 = false
 	t.Cleanup(h.upstream.Close)
 
 	pack, err := rules.ParsePack([]byte(testPack))
@@ -79,12 +134,15 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	broker := approval.NewBroker(5 * time.Second)
-	h.decider = &autoDecider{broker: broker}
+	h.broker = broker
+	h.decider = &autoDecider{broker: broker, held: make(chan approval.Request, 4)}
 	broker.AddNotifier(h.decider)
 
+	upstreamTransport := h.upstream.Client().Transport.(*http.Transport)
 	srv := New(Options{
 		Engine: engine, CA: authority, Broker: broker, Logf: t.Logf, Version: "test",
-		Transport: h.upstream.Client().Transport, // trusts the upstream's test cert
+		Transport:   upstreamTransport, // trusts the upstream's test cert
+		UpstreamTLS: upstreamTransport.TLSClientConfig,
 	})
 	front := httptest.NewServer(srv)
 	t.Cleanup(front.Close)
@@ -195,6 +253,61 @@ func TestUnwatchedHostIsTunneledNotIntercepted(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("X-Twokey") != "" || h.decider.holds.Load() != 0 {
 		t.Fatalf("tunnel should be transparent: status=%d header=%q holds=%d",
 			resp.StatusCode, resp.Header.Get("X-Twokey"), h.decider.holds.Load())
+	}
+}
+
+func TestClientDisconnectDuringHoldNeverForwards(t *testing.T) {
+	h := newHarness(t)
+	h.decider.manual.Store(true)
+	tc, _ := h.rawTLS(t)
+	fmt.Fprintf(tc, "DELETE /repos/acme/api HTTP/1.1\r\nHost: %s\r\n\r\n", h.upstream.Listener.Addr())
+
+	held := <-h.decider.held
+	tc.Close() // the agent gives up (e.g. its own HTTP timeout)
+	waitFor(t, "hold to be cancelled", func() bool { return len(h.broker.Pending()) == 0 })
+
+	if h.broker.Resolve(held.ID, approval.Decision{Approved: true, By: "test"}) {
+		t.Fatal("approving after the client left must have no effect")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := h.upstreamHits.Load(); n != 0 {
+		t.Fatalf("orphaned destructive request reached upstream (%d hits)", n)
+	}
+}
+
+func TestExpectContinueDoesNotStall(t *testing.T) {
+	h := newHarness(t)
+	client := h.client("")
+	client.Transport.(*http.Transport).ExpectContinueTimeout = 10 * time.Second
+	req, _ := http.NewRequest("POST", h.upstream.URL+"/graphql", strings.NewReader(`{"query":"query { me { id } }"}`))
+	req.Header.Set("Expect", "100-continue")
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("client waited %s for 100-continue", took)
+	}
+}
+
+func TestWebSocketUpgradeOnWatchedHost(t *testing.T) {
+	h := newHarness(t)
+	tc, br := h.rawTLS(t)
+	fmt.Fprintf(tc, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", h.upstream.Listener.Addr())
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("want 101, got %v %v", err, resp)
+	}
+	_, _ = io.WriteString(tc, "ping")
+	buf := make([]byte, 4)
+	_ = tc.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(br, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("echo through upgraded connection failed: %q %v", buf, err)
 	}
 }
 

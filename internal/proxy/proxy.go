@@ -7,13 +7,16 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +33,8 @@ const (
 	maxInspectBody   = 32 << 20
 	dialTimeout      = 15 * time.Second
 	handshakeTimeout = 15 * time.Second
+	// idleTimeout closes intercepted keep-alive connections nobody uses.
+	idleTimeout = 5 * time.Minute
 )
 
 // Options configures a Server.
@@ -42,6 +47,9 @@ type Options struct {
 	Version string
 	// Transport overrides the upstream transport (tests).
 	Transport http.RoundTripper
+	// UpstreamTLS configures raw TLS dials for Upgrade (WebSocket) requests.
+	// Defaults to the system roots.
+	UpstreamTLS *tls.Config
 }
 
 // Server implements http.Handler for forward-proxy traffic.
@@ -51,15 +59,19 @@ type Server struct {
 	broker    *approval.Broker
 	audit     *audit.Log
 	logf      func(string, ...any)
-	version   string
-	transport http.RoundTripper
+	version     string
+	transport   http.RoundTripper
+	upstreamTLS *tls.Config
 }
 
 // New builds a proxy server.
 func New(o Options) *Server {
 	s := &Server{
 		engine: o.Engine, ca: o.CA, broker: o.Broker, audit: o.Audit,
-		logf: o.Logf, version: o.Version, transport: o.Transport,
+		logf: o.Logf, version: o.Version, transport: o.Transport, upstreamTLS: o.UpstreamTLS,
+	}
+	if s.upstreamTLS == nil {
+		s.upstreamTLS = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 	if s.logf == nil {
 		s.logf = log.Printf
@@ -175,25 +187,103 @@ func (s *Server) intercept(client net.Conn, target string) {
 
 	br := bufio.NewReader(tlsConn)
 	for {
+		_ = tlsConn.SetReadDeadline(time.Now().Add(idleTimeout))
 		req, err := http.ReadRequest(br)
 		if err != nil {
 			return
 		}
+		_ = tlsConn.SetReadDeadline(time.Time{})
 		req.URL.Scheme = "https"
 		req.URL.Host = target // dial the CONNECT target, never a spoofed Host header
-		resp := s.handle(req, host)
+		if strings.EqualFold(req.Header.Get("Expect"), "100-continue") {
+			// We need the body to inspect it; don't make the client wait.
+			req.Header.Del("Expect")
+			if _, err := io.WriteString(tlsConn, "HTTP/1.1 100 Continue\r\n\r\n"); err != nil {
+				return
+			}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		req = req.WithContext(ctx)
+		if isUpgrade(req) {
+			s.upgrade(tlsConn, br, req, host, target)
+			cancel()
+			return
+		}
+		resp := s.handle(req, host, clientWatcher(tlsConn, br, cancel))
 		keepAlive := !req.Close && !resp.Close
 		err = writeResponse(tlsConn, req, resp)
 		resp.Body.Close()
+		cancel()
 		if err != nil || !keepAlive {
 			return
 		}
 	}
 }
 
-// handlePlain proxies absolute-form http:// requests.
+// clientWatcher returns a function that, while a request is held, watches
+// the client connection and cancels the request if the client goes away.
+// The returned stop function must be called before anything else reads br.
+func clientWatcher(conn net.Conn, br *bufio.Reader, cancel context.CancelFunc) func() (stop func()) {
+	return func() func() {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if _, err := br.Peek(1); err != nil && !isTimeout(err) {
+				cancel() // EOF / reset: nobody is waiting for this response
+			}
+		}()
+		return func() {
+			_ = conn.SetReadDeadline(time.Now()) // unblock Peek
+			<-done
+			_ = conn.SetReadDeadline(time.Time{})
+		}
+	}
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+func isUpgrade(req *http.Request) bool {
+	return req.Header.Get("Upgrade") != "" &&
+		strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade")
+}
+
+// upgrade handles WebSocket (and other Upgrade) requests on intercepted
+// hosts: rules are checked on the handshake, then bytes are spliced.
+func (s *Server) upgrade(client net.Conn, br *bufio.Reader, req *http.Request, host, target string) {
+	if resp := s.check(req, host, nil, nil); resp != nil {
+		_ = writeResponse(client, req, resp)
+		return
+	}
+	cfg := s.upstreamTLS.Clone()
+	cfg.ServerName = host
+	cfg.NextProtos = []string{"http/1.1"}
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: dialTimeout}, Config: cfg}
+	upstream, err := dialer.DialContext(req.Context(), "tcp", target)
+	if err != nil {
+		_ = writeResponse(client, req, jsonResponse(req, http.StatusBadGateway, errorBody("twokey_upstream_error", err.Error())))
+		return
+	}
+	defer upstream.Close()
+	req.Header.Del("Proxy-Connection")
+	req.Header.Del("Proxy-Authorization")
+	if err := req.Write(upstream); err != nil {
+		return
+	}
+	var once sync.Once
+	done := make(chan struct{})
+	finish := func() { once.Do(func() { close(done) }) }
+	go func() { _, _ = io.Copy(upstream, br); finish() }()
+	go func() { _, _ = io.Copy(client, upstream); finish() }()
+	<-done
+}
+
+// handlePlain proxies absolute-form http:// requests. net/http cancels
+// r.Context() when the client disconnects, so no watcher is needed.
 func (s *Server) handlePlain(w http.ResponseWriter, r *http.Request) {
-	resp := s.handle(r, r.URL.Hostname())
+	resp := s.handle(r, r.URL.Hostname(), nil)
 	defer resp.Body.Close()
 	removeHopHeaders(resp.Header)
 	for k, vs := range resp.Header {
@@ -206,44 +296,82 @@ func (s *Server) handlePlain(w http.ResponseWriter, r *http.Request) {
 }
 
 // handle inspects one request and returns the response to send back.
-func (s *Server) handle(req *http.Request, host string) *http.Response {
+// watch (optional) starts monitoring the client while a request is held.
+func (s *Server) handle(req *http.Request, host string, watch func() func()) *http.Response {
 	if !s.engine.HostWatched(host) {
 		return s.forward(req)
 	}
 	var body []byte
-	if s.engine.NeedsBody(host) && req.Body != nil {
-		b, err := io.ReadAll(io.LimitReader(req.Body, maxInspectBody+1))
-		req.Body.Close()
-		if err != nil {
-			return jsonResponse(req, http.StatusBadRequest, errorBody("twokey_error", "reading request body: "+err.Error()))
-		}
-		if len(b) > maxInspectBody {
-			return jsonResponse(req, http.StatusRequestEntityTooLarge, errorBody("twokey_error", "request body too large for twokey to inspect"))
+	if s.engine.NeedsBody(host) {
+		b, errResp := bufferBody(req)
+		if errResp != nil {
+			return errResp
 		}
 		body = b
-		req.Body = io.NopCloser(bytes.NewReader(b))
-		req.ContentLength = int64(len(b))
 	}
+	if resp := s.check(req, host, body, watch); resp != nil {
+		return resp
+	}
+	return s.forward(req)
+}
 
+// check evaluates req and, if it is destructive, holds it for a human.
+// It returns nil when the request may proceed, else the response to send.
+func (s *Server) check(req *http.Request, host string, body []byte, watch func() func()) *http.Response {
 	v := s.engine.Evaluate(rules.Request{
 		Method: req.Method, Host: host, Path: req.URL.Path, Query: req.URL.RawQuery,
 		Header: req.Header, Body: body,
 	})
-	if v.Hold() {
-		held, d := s.broker.Decide(req.Context(), approval.Request{
-			Method: req.Method, URL: displayURL(req), Matches: v.Matches, Uninspectable: v.Uninspectable,
-		})
-		if err := s.audit.Write(audit.Entry{
-			Time: time.Now(), ID: held.ID, Method: held.Method, URL: held.URL, Matches: held.Matches,
-			Uninspectable: held.Uninspectable, Approved: d.Approved, By: d.By, Reason: d.Reason,
-		}); err != nil {
-			s.logf("audit log write failed: %v", err)
-		}
-		if !d.Approved {
-			return blockedResponse(req, held, d)
+	if !v.Hold() {
+		return nil
+	}
+	if body == nil {
+		// Consume the body now so the client watcher is the only reader.
+		if _, errResp := bufferBody(req); errResp != nil {
+			return errResp
 		}
 	}
-	return s.forward(req)
+	stop := func() {}
+	if watch != nil {
+		stop = watch()
+	}
+	held, d := s.broker.Decide(req.Context(), approval.Request{
+		Method: req.Method, URL: displayURL(req), Matches: v.Matches, Uninspectable: v.Uninspectable,
+	})
+	stop()
+	if d.Approved && req.Context().Err() != nil {
+		// Approved, but the requester is gone: never fire an orphaned request.
+		d = approval.Decision{By: "client", Reason: "client disconnected before the decision"}
+	}
+	if err := s.audit.Write(audit.Entry{
+		Time: time.Now(), ID: held.ID, Method: held.Method, URL: held.URL, Matches: held.Matches,
+		Uninspectable: held.Uninspectable, Approved: d.Approved, By: d.By, Reason: d.Reason,
+	}); err != nil {
+		s.logf("audit log write failed: %v", err)
+	}
+	if !d.Approved {
+		return blockedResponse(req, held, d)
+	}
+	return nil
+}
+
+// bufferBody reads the whole request body (capped) and replaces it with an
+// in-memory copy so it can be both inspected and forwarded.
+func bufferBody(req *http.Request) ([]byte, *http.Response) {
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil, nil
+	}
+	b, err := io.ReadAll(io.LimitReader(req.Body, maxInspectBody+1))
+	req.Body.Close()
+	if err != nil {
+		return nil, jsonResponse(req, http.StatusBadRequest, errorBody("twokey_error", "reading request body: "+err.Error()))
+	}
+	if len(b) > maxInspectBody {
+		return nil, jsonResponse(req, http.StatusRequestEntityTooLarge, errorBody("twokey_error", "request body too large for twokey to inspect"))
+	}
+	req.Body = io.NopCloser(bytes.NewReader(b))
+	req.ContentLength = int64(len(b))
+	return b, nil
 }
 
 func (s *Server) forward(req *http.Request) *http.Response {

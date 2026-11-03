@@ -41,7 +41,7 @@ Usage:
   twokey replay <scenario> [--live]                    replay a real-world incident
   twokey explain --method M --url U [-H k:v] [--data D] would this request be held?
   twokey rules [--rules DIR]                           list destructive-operation rules
-  twokey ca init|path|trust                            manage the local CA
+  twokey ca init|path|trust|reset                      manage the local CA
   twokey ntfy-topic                                    generate a private phone topic
   twokey version
 
@@ -122,12 +122,19 @@ func homeDir() (string, error) {
 	return filepath.Join(h, ".twokey"), nil
 }
 
-func loadAuthority() (*ca.Authority, bool, error) {
+// loadAuthority loads (or creates) the CA, name-constrained to the domains
+// of engine's rules (builtin rules when engine is nil).
+func loadAuthority(engine *rules.Engine) (*ca.Authority, bool, error) {
 	home, err := homeDir()
 	if err != nil {
 		return nil, false, err
 	}
-	return ca.LoadOrCreate(home)
+	if engine == nil {
+		if engine, err = loadEngine(""); err != nil {
+			return nil, false, err
+		}
+	}
+	return ca.LoadOrCreate(home, engine.Domains()...)
 }
 
 // loadEngine combines builtin packs with optional user packs from dir.
@@ -258,9 +265,23 @@ func explain(w io.Writer, engine *rules.Engine, method, rawURL string, h http.He
 
 func cmdCA(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twokey ca init|path|trust")
+		return errors.New("usage: twokey ca init|path|trust|reset")
 	}
-	a, created, err := loadAuthority()
+	if args[0] == "reset" {
+		home, err := homeDir()
+		if err != nil {
+			return err
+		}
+		if err := ca.Reset(home); err != nil {
+			return err
+		}
+		fmt.Println("CA removed from", home, "— a new one is created on the next `twokey up`.")
+		if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+			fmt.Println("If you ran `twokey ca trust`, remove the old \"twokey local CA\" from your OS trust store and trust the new one.")
+		}
+		return nil
+	}
+	a, created, err := loadAuthority(nil)
 	if err != nil {
 		return err
 	}
@@ -383,7 +404,7 @@ func cmdReplay(args []string) error {
 // replayLive sends the scenario through the proxy. It carries no
 // credentials, so even an approved request is rejected by the provider.
 func replayLive(addr string, sc scenario) error {
-	a, _, err := loadAuthority()
+	a, _, err := loadAuthority(nil)
 	if err != nil {
 		return err
 	}

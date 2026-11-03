@@ -85,6 +85,15 @@ For hosts that have rules, twokey terminates TLS with a certificate from a local
 in `~/.twokey`, parses each request, and either forwards it or holds it. Requests it cannot parse
 on a watched GraphQL endpoint (e.g. persisted queries) are held too — it fails closed.
 
+- The local CA is **name-constrained** to the domains in your rule packs (`github.com`,
+  `amazonaws.com`, `railway.com`, …): even a leaked `ca-key.pem` cannot impersonate other sites.
+  If you add rules for new domains, run `twokey ca reset` (and `twokey ca trust` again if you used it).
+- `twokey run` replaces any existing `NO_PROXY` (keeping only localhost) so an entry like
+  `.amazonaws.com` can't silently route around the guard.
+- If the agent disconnects while a request is held, the request is dropped — approving it
+  afterwards does nothing.
+- WebSocket upgrades on watched hosts are checked against the rules, then passed through.
+
 ### Platform notes
 
 - **Windows / macOS:** Go programs (`gh`, `terraform`, `flyctl`) and Windows `curl` (Schannel)

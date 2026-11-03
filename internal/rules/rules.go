@@ -8,6 +8,7 @@ package rules
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"path"
 	"sort"
@@ -161,6 +162,34 @@ func (e *Engine) HostWatched(host string) bool {
 		}
 	}
 	return false
+}
+
+// Domains returns the registrable domains (last two labels) of every rule
+// host, e.g. "rds.*.amazonaws.com" -> "amazonaws.com". The local CA is
+// name-constrained to these. IP-literal hosts are skipped.
+func (e *Engine) Domains() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range e.rules {
+		for _, h := range r.Hosts {
+			h = strings.ToLower(strings.TrimSuffix(h, "."))
+			if net.ParseIP(h) != nil {
+				continue
+			}
+			labels := strings.Split(h, ".")
+			if len(labels) > 2 {
+				labels = labels[len(labels)-2:]
+			}
+			d := strings.Join(labels, ".")
+			if strings.Contains(d, "*") || seen[d] {
+				continue
+			}
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // NeedsBody reports whether evaluating requests to host requires the request
