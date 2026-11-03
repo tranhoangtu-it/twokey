@@ -1,14 +1,15 @@
 # twokey
 
 **A two-person rule for AI agents.** A local proxy that holds destructive cloud API calls
-(`volumeDelete`, `DeleteDBInstance`, `DELETE /repos/…`) until you approve them — in another
-window or on your phone. Your agent can't approve itself.
+(`volumeDelete`, `DeleteDBInstance`, `DELETE /repos/…`) until a human approves them — in another
+window or on your phone. Built for accidents: an agent can't approve its own request by mistake.
+It is not a sandbox against a malicious agent ([threat model](#threat-model--read-this)).
 
 ```text
 $ twokey replay pocketos --live
 
 ⏸  HOLD #1  POST https://backboard.railway.com/graphql/v2
-   CRITICAL railway.volume.delete  operation=volumeDelete  resource=pg-data-prod
+   CRITICAL railway.volume.delete  operation=volumeDelete  resource="pg-data-prod"
             Deletes a Railway volume. This is the call behind the April 2026 PocketOS production wipe.
    → approve 1 pg-data-prod     |     deny 1
 deny 1
@@ -18,80 +19,97 @@ deny 1
 ## Why
 
 On April 25, 2026 a coding agent working on a *staging* task deleted PocketOS's production
-database volume — and its backups — in about nine seconds. It didn't run `rm -rf` or `DROP TABLE`.
-It made one HTTPS call to Railway's GraphQL API. Existing guards missed it:
+database volume — and its backups — in about nine seconds
+([report](https://abc7.com/post/rogue-ai-agent-cursor-goes-haywire-deletes-tech-companys-database/19008099/)).
+It didn't run `rm -rf` or `DROP TABLE`. It made one HTTPS call to Railway's GraphQL API.
 
-| Guard | Why it misses |
+| Guard | Why it misses this |
 |---|---|
 | Bash hooks / command deny-lists | See the command string, not the effect. `curl`, a Python one-liner or an SDK call sails through. |
 | SQL proxies | The deletion never touched SQL. It was a cloud control-plane API call. |
 | "Block HTTP DELETE" egress rules | GraphQL mutations are all `POST`. |
 
 twokey sits on the network path and **understands the protocols**: REST method + path,
-GraphQL mutation names (aliases, fragments and batches included), and AWS actions
-(`Action=` and `X-Amz-Target`). Only hosts with rules are inspected; everything else —
-including your LLM API traffic — is tunneled untouched.
+GraphQL mutations (aliases, fragments, batches, GET), and AWS actions (`Action=` and
+`X-Amz-Target`). Only hosts with rules are inspected; everything else — including your LLM API
+traffic — is tunneled untouched.
 
-## Quick start
+## Try it in 5 seconds (no setup, no network)
+
+```sh
+twokey replay pocketos
+twokey explain --method DELETE --url https://api.github.com/repos/acme/prod-api   # exit 2 = held
+```
+
+## Install
+
+Download a binary from [Releases](https://github.com/tranhoangtu-it/twokey/releases)
+(Linux, macOS, Windows; amd64/arm64), or with Go ≥ 1.25:
 
 ```sh
 go install github.com/tranhoangtu-it/twokey/cmd/twokey@latest
-
-# terminal 1: proxy + approval prompt (optionally your phone)
-twokey up --ntfy-topic "$(twokey ntfy-topic)"
-
-# terminal 2: run any agent through it
-twokey run -- claude          # or codex, cursor-agent, aider, opencode…
-
-# check that curl / python / node / go in your environment are covered
-twokey doctor
 ```
 
-When the agent tries something destructive, the request **waits**. You get a prompt in the
-`twokey up` window (type the resource name to approve) and, with `--ntfy-topic`, a push
-notification with **Approve / Deny** buttons via [ntfy](https://ntfy.sh). Nobody answers within
-2 minutes → denied. A denied request returns `403` with a JSON body written for the model:
+## Use it
+
+**One terminal, approve on your phone** (recommended):
+
+```sh
+twokey phone                  # once: prints a private ntfy topic to subscribe to in the ntfy app
+twokey run --phone -- claude  # or codex, cursor-agent, aider, opencode…
+```
+
+**Two terminals, approve by typing** (plus the phone, if you want):
+
+```sh
+twokey up --phone             # terminal 1: proxy + approval prompt
+twokey run -- claude          # terminal 2
+twokey doctor                 # check that curl / python / node / go are covered
+```
+
+When the agent tries something destructive, the request **waits**. In the `twokey up` window you
+approve by typing the resource name (`approve 1 pg-data-prod`); on your phone you get an
+[ntfy](https://ntfy.sh) push with **Approve / Deny** buttons. Nobody answers within 2 minutes →
+denied. If the agent gives up while waiting, the request is dropped — approving later does nothing.
+A denied request returns `403` with a JSON body written for the model:
 
 > twokey blocked a destructive request (denied by a human): railway volumeDelete on pg-data-prod.
 > Do not retry, rephrase, or work around this request… ask the user to approve it or run it themselves.
 
 Every hold is appended to `~/.twokey/audit.jsonl`.
 
-## What's covered (v0.1)
+## What's covered
 
-`twokey rules` lists them all — 35 rules across Railway, AWS (RDS, EC2, DynamoDB,
-CloudFormation, S3, Lambda, EKS), GitHub (REST + GraphQL), Vercel, Supabase, Neon, Fly.io,
-Cloudflare and DigitalOcean. Rules are small YAML files:
+`twokey rules` lists all 44 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
+Lambda, EKS, Secrets Manager, ECR, Route 53), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
+Fly.io, Cloudflare and DigitalOcean. Rules are small YAML files:
 
 ```yaml
 - id: railway.volume.delete
   hosts: [backboard.railway.com, backboard.railway.app]
-  path: /graphql/v2
+  path: /graphql/{endpoint}
   graphql: { mutations: [volumeDelete] }
   resource: "{volumeId}"
   severity: critical
 ```
 
-Test a rule without any network: `twokey explain --method DELETE --url https://api.github.com/repos/acme/api`
-(exit code 2 = would be held). Load your own packs with `--rules ./my-rules`.
-**Adding a provider is the best first PR.**
+Load your own with `--rules ./my-rules`. **Adding a provider is the best first PR** — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
 
 `twokey run` sets `HTTPS_PROXY` plus CA-trust variables for each runtime
 (`NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
-`CURL_CA_BUNDLE`, `AWS_CA_BUNDLE`) and starts your agent. Every child process inherits them.
-For hosts that have rules, twokey terminates TLS with a certificate from a local CA it generates
-in `~/.twokey`, parses each request, and either forwards it or holds it. Requests it cannot parse
-on a watched GraphQL endpoint (e.g. persisted queries) are held too — it fails closed.
+`CURL_CA_BUNDLE`, `AWS_CA_BUNDLE`), replaces `NO_PROXY` with localhost only, removes
+`TWOKEY_NTFY_*` from the agent's environment, and starts your agent; every child process
+inherits this. For hosts that have rules, twokey terminates TLS with a certificate from a local CA
+in `~/.twokey`, decodes each request (including gzip/deflate bodies) and forwards or holds it.
+Requests it cannot read on a watched endpoint (persisted GraphQL queries, unknown encodings) are
+held — it fails closed.
 
-- The local CA is **name-constrained** to the domains in your rule packs (`github.com`,
-  `amazonaws.com`, `railway.com`, …): even a leaked `ca-key.pem` cannot impersonate other sites.
-  If you add rules for new domains, run `twokey ca reset` (and `twokey ca trust` again if you used it).
-- `twokey run` replaces any existing `NO_PROXY` (keeping only localhost) so an entry like
-  `.amazonaws.com` can't silently route around the guard.
-- If the agent disconnects while a request is held, the request is dropped — approving it
-  afterwards does nothing.
+- The local CA is **name-constrained** to the rule packs' domains (`github.com`, `amazonaws.com`,
+  `railway.com`, …): even a leaked `ca-key.pem` cannot impersonate other sites. After adding rules
+  for new domains, run `twokey ca reset` (and `twokey ca trust` again if you used it).
 - WebSocket upgrades on watched hosts are checked against the rules, then passed through.
 
 ### Platform notes
@@ -100,20 +118,27 @@ on a watched GraphQL endpoint (e.g. persisted queries) are held too — it fails
   use the OS trust store and ignore `SSL_CERT_FILE`. Run `twokey ca trust` once (user store,
   no admin). `twokey doctor` tells you exactly which runtimes need it.
 - **Node:** needs ≥ 22.21 or ≥ 24.5 (`NODE_USE_ENV_PROXY`).
-- HTTP/1.1 is used between the agent and twokey on intercepted hosts; upstream may be HTTP/2.
+- **Not covered yet:** the JVM (Java SDKs ignore `HTTPS_PROXY`), and clients that ignore proxy
+  variables. Between the agent and twokey, intercepted hosts speak HTTP/1.1 (HTTP/2-only clients
+  such as gRPC are not supported there).
+
+### Exit codes
+
+`explain`: 0 = passes, 2 = would be held. `run`: the agent's exit status, or 125 if twokey itself
+failed (e.g. no proxy running).
 
 ## Threat model — read this
 
 twokey protects you from **accidents**: an agent that guesses wrong, misreads an environment,
 or "cleans up" the wrong thing. It is **not** a sandbox against a deliberately malicious agent,
-which runs as your user and could unset `HTTPS_PROXY` or read the CA key. For that, run the agent
+which runs as your user and could unset `HTTPS_PROXY` or read `~/.twokey`. For that, run the agent
 in a container/VM whose only network egress is twokey. Also: scope your cloud tokens and keep
-backups somewhere a single API call can't reach.
+backups somewhere a single API call can't reach. See [SECURITY.md](SECURITY.md).
 
 ## Roadmap
 
 Postgres wire protocol (`DROP`, `TRUNCATE`, `DELETE` without `WHERE`) · `--strict` sandbox mode ·
-more providers · per-project allow rules.
+JVM support · more providers · per-project allow rules.
 
 ## License
 

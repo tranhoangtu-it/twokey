@@ -106,6 +106,9 @@ func cmdRun(args []string) error {
 		if err != nil {
 			return setupFailure(err)
 		}
+		if err := os.MkdirAll(home, 0o700); err != nil { // first run: no ~/.twokey yet
+			return setupFailure(err)
+		}
 		logFile, err := os.OpenFile(filepath.Join(home, "twokey.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			return setupFailure(err)

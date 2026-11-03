@@ -238,7 +238,7 @@ func (s *Server) intercept(client net.Conn, target string) {
 		}
 		var body *eofTracker
 		if req.Body != nil && req.Body != http.NoBody {
-			body = &eofTracker{ReadCloser: req.Body}
+			body = newEOFTracker(req.Body)
 			req.Body = body
 		}
 		resp := s.handle(req, host, clientWatcher(tlsConn, br, cancel))
@@ -249,8 +249,11 @@ func (s *Server) intercept(client net.Conn, target string) {
 		// (early 401/413 on an upload), the rest of that body is still in br
 		// — and the transport may still be reading it. Never reuse the
 		// connection then, or the leftover bytes become the "next request".
-		bodyDone := body == nil || body.done()
-		if err != nil || mustClose || req.Close || resp.Close || !bodyDone {
+		if body != nil && !body.done() {
+			lingerClose(tlsConn, br, body)
+			return
+		}
+		if err != nil || mustClose || req.Close || resp.Close {
 			return
 		}
 	}
@@ -511,10 +514,17 @@ func writeResponse(w io.Writer, req *http.Request, resp *http.Response) (mustClo
 	return resp.Close, resp.Write(w)
 }
 
-// eofTracker records whether a request body was read to the end.
+// eofTracker records whether a request body was read to the end, and when
+// its consumer (the upstream transport) is finished with it.
 type eofTracker struct {
 	io.ReadCloser
-	eof atomic.Bool
+	eof       atomic.Bool
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func newEOFTracker(rc io.ReadCloser) *eofTracker {
+	return &eofTracker{ReadCloser: rc, closed: make(chan struct{})}
 }
 
 func (t *eofTracker) Read(p []byte) (int, error) {
@@ -525,7 +535,37 @@ func (t *eofTracker) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// Close signals only after the underlying Close returns: for bodies from
+// http.ReadRequest, Close itself drains the rest of the body from br, so
+// nobody else may touch br until it is done.
+func (t *eofTracker) Close() error {
+	err := t.ReadCloser.Close()
+	t.closeOnce.Do(func() { close(t.closed) })
+	return err
+}
+
 func (t *eofTracker) done() bool { return t.eof.Load() }
+
+const (
+	lingerWait     = 2 * time.Second
+	lingerMaxBytes = 16 << 20
+)
+
+// lingerClose ends a connection whose request body was not fully read
+// without losing the response we just wrote: closing a socket with unread
+// input makes the OS send RST, which can destroy the response in flight.
+// So: wait until the transport is done with the body (it is the only other
+// reader of br), half-close our side, then discard what's left for a while.
+func lingerClose(conn *tls.Conn, br *bufio.Reader, body *eofTracker) {
+	select {
+	case <-body.closed:
+	case <-time.After(lingerWait):
+		return // transport still reading br: don't race it, just close
+	}
+	_ = conn.CloseWrite()
+	_ = conn.SetReadDeadline(time.Now().Add(lingerWait))
+	_, _ = io.Copy(io.Discard, io.LimitReader(br, lingerMaxBytes))
+}
 
 type flushWriter struct{ w http.ResponseWriter }
 
