@@ -334,6 +334,8 @@ func blockedResponse(req *http.Request, held approval.Request, d approval.Decisi
 	}
 	resp := jsonResponse(req, http.StatusForbidden, body)
 	resp.Header.Set("X-Twokey", "blocked")
+	// The request body may be unread; don't reuse the connection.
+	resp.Close = true
 	return resp
 }
 

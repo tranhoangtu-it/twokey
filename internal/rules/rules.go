@@ -286,9 +286,10 @@ func normalizeHost(host string) string {
 		}
 	}
 	if i := strings.LastIndexByte(h, ':'); i > 0 && strings.Count(h, ":") == 1 {
-		return h[:i]
+		h = h[:i]
 	}
-	return h
+	// "api.github.com." is the same host as "api.github.com" (FQDN form).
+	return strings.TrimRight(h, ".")
 }
 
 func mergeVars(a, b map[string]string) map[string]string {

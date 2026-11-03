@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,18 +30,27 @@ type Request struct {
 	Nonce string
 }
 
-// ConfirmText is what a human must type in the terminal to approve: the
-// resource name when known, otherwise the operation name.
+// ConfirmText is what a human must type in the terminal to approve: every
+// distinct resource name (space-separated) so a batch of deletes cannot be
+// approved by typing only the first; operation names stand in for unknown
+// resources.
 func (r Request) ConfirmText() string {
+	seen := map[string]bool{}
+	var parts []string
 	for _, m := range r.Matches {
-		if m.Resource != "" {
-			return m.Resource
+		token := m.Resource
+		if token == "" {
+			token = m.Operation
+		}
+		if !seen[token] {
+			seen[token] = true
+			parts = append(parts, token)
 		}
 	}
-	if len(r.Matches) > 0 {
-		return r.Matches[0].Operation
+	if len(parts) == 0 {
+		return "yes"
 	}
-	return "yes"
+	return strings.Join(parts, " ")
 }
 
 // Summary is a one-line description for notifications and logs.
