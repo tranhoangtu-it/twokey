@@ -3,6 +3,7 @@
 package ca
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -125,12 +126,34 @@ func createLocked(dir string, permitted []string) (bool, error) {
 	return true, nil
 }
 
+// writeFileAtomic writes via a unique temp file + rename, so concurrent
+// twokey processes never truncate each other's output. If the rename fails
+// (on Windows: the target is open in another process) but the target
+// already holds the same bytes, that is success.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	defer os.Remove(tmp) // no-op after a successful rename
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, data) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // Reset deletes the CA (and the bundle that embeds it) from dir.

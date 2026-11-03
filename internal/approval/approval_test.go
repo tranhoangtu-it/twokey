@@ -125,6 +125,7 @@ func TestPromptIsSanitizedAndWhitespaceTolerant(t *testing.T) {
 	}()
 	held := <-rec.reqs
 	term.Notify(held)
+	term.Flush()
 	if strings.Contains(out.String(), "\x1b") {
 		t.Fatal("terminal output contains ESC")
 	}
@@ -151,6 +152,31 @@ func TestStaleIDDoesNotFallThrough(t *testing.T) {
 	}
 	term.Handle("deny " + held.ID)
 	<-res
+}
+
+func TestStalledConsoleNeverBlocksHolds(t *testing.T) {
+	_, stalled := io.Pipe() // writes block forever: nobody reads
+	b := NewBroker(100 * time.Millisecond)
+	b.AddNotifier(NewTerminal(b, stalled))
+	const n = outputQueue + 5 // overflow the output queue too
+	done := make(chan Decision, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, d := b.Decide(context.Background(), Request{Matches: volumeDelete})
+			done <- d
+		}()
+	}
+	deadline := time.After(10 * time.Second)
+	for i := 0; i < n; i++ {
+		select {
+		case d := <-done:
+			if d.By != "timeout" {
+				t.Fatalf("want timeout, got %+v", d)
+			}
+		case <-deadline:
+			t.Fatal("holds blocked behind a stalled console")
+		}
+	}
 }
 
 func TestDenyAllOnShutdown(t *testing.T) {

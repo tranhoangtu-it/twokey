@@ -234,7 +234,7 @@ func (s *Server) intercept(client net.Conn, target string) {
 		ctx, cancel := context.WithCancel(context.Background())
 		req = req.WithContext(ctx)
 		if isUpgrade(req) {
-			s.upgrade(tlsConn, br, req, host, target)
+			s.upgrade(tlsConn, br, req, host, target, clientWatcher(tlsConn, br, cancel))
 			cancel()
 			return
 		}
@@ -305,8 +305,8 @@ func connectionTokens(h http.Header) map[string]bool {
 
 // upgrade handles WebSocket (and other Upgrade) requests on intercepted
 // hosts: rules are checked on the handshake, then bytes are spliced.
-func (s *Server) upgrade(client net.Conn, br *bufio.Reader, req *http.Request, host, target string) {
-	if resp := s.check(req, host, nil, nil); resp != nil {
+func (s *Server) upgrade(client net.Conn, br *bufio.Reader, req *http.Request, host, target string, watch func() func()) {
+	if resp := s.check(req, host, nil, watch); resp != nil {
 		_, _ = writeResponse(client, req, resp)
 		return
 	}
@@ -415,6 +415,9 @@ func (s *Server) check(req *http.Request, host string, body []byte, watch func()
 func decodeForInspection(encoding string, body []byte) ([]byte, error) {
 	var r io.ReadCloser
 	var err error
+	if len(body) == 0 {
+		return body, nil // nothing to decode (e.g. empty body with Content-Encoding)
+	}
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "", "identity":
 		return body, nil

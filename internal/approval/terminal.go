@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 )
 
 // Terminal is the approval channel in the `twokey up` window. That window is
@@ -21,19 +20,48 @@ import (
 // With exactly one pending request the id may be omitted.
 type Terminal struct {
 	broker *Broker
-	out    io.Writer
-	mu     sync.Mutex // serializes writes to out
+	lines  chan termLine
 }
 
-// NewTerminal builds a terminal channel writing to out.
+// termLine is queued output, or (flush != nil) a marker to signal when
+// everything before it has been written.
+type termLine struct {
+	text  string
+	flush chan struct{}
+}
+
+// outputQueue bounds buffered terminal output.
+const outputQueue = 256
+
+// NewTerminal builds a terminal channel writing to out. Writes happen on a
+// dedicated goroutine: a stalled console (e.g. Windows QuickEdit selection)
+// must never block the broker, the hold timeout or the phone channel.
 func NewTerminal(b *Broker, out io.Writer) *Terminal {
-	return &Terminal{broker: b, out: out}
+	t := &Terminal{broker: b, lines: make(chan termLine, outputQueue)}
+	go func() {
+		for l := range t.lines {
+			if l.flush != nil {
+				close(l.flush)
+				continue
+			}
+			_, _ = io.WriteString(out, l.text)
+		}
+	}()
+	return t
 }
 
 func (t *Terminal) printf(format string, args ...any) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	fmt.Fprintf(t.out, format, args...)
+	select {
+	case t.lines <- termLine{text: fmt.Sprintf(format, args...)}:
+	default: // console stalled and queue full: drop output, never block a hold
+	}
+}
+
+// Flush waits until queued output has been written (tests, shutdown).
+func (t *Terminal) Flush() {
+	done := make(chan struct{})
+	t.lines <- termLine{flush: done}
+	<-done
 }
 
 // Notify prints a held request.

@@ -38,11 +38,13 @@ func (r Request) ConfirmText() string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, m := range r.Matches {
-		token := m.Resource
-		if token == "" {
-			token = m.Operation
+		token := NormalizeSpace(Clean(m.Resource))
+		if token == "" { // unknown or blank resource: confirm the operation
+			token = NormalizeSpace(Clean(m.Operation))
 		}
-		token = NormalizeSpace(Clean(token))
+		if token == "" {
+			continue
+		}
 		if !seen[token] {
 			seen[token] = true
 			parts = append(parts, token)

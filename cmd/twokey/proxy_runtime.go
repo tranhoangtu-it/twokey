@@ -159,7 +159,19 @@ func phoneTopic(dir string, rotate bool) (string, error) {
 		return "", err
 	}
 	topic := "twokey-" + randomHex(12)
-	if err := os.WriteFile(path, []byte(topic+"\n"), 0o600); err != nil {
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if !rotate {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_EXCL // first-run race: one winner
+	}
+	f, err := os.OpenFile(path, flags, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return phoneTopic(dir, false) // another process just created it
+	}
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(topic + "\n"); err != nil {
 		return "", err
 	}
 	return topic, nil
