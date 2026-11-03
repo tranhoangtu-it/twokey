@@ -120,7 +120,9 @@ held — it fails closed.
 
 - **Windows / macOS:** Go programs (`gh`, `terraform`, `flyctl`) and Windows `curl` (Schannel)
   use the OS trust store and ignore `SSL_CERT_FILE`. Run `twokey ca trust` once (user store,
-  no admin). `twokey doctor` tells you exactly which runtimes need it.
+  no admin). `twokey doctor` tells you exactly which runtimes need it. On Windows, `twokey run`
+  also gives curl a `CURL_HOME` config with `ssl-revoke-best-effort` (your own `.curlrc` is
+  kept): Schannel otherwise rejects local-CA certificates, which have no revocation endpoint.
 - **Node:** needs ≥ 22.21 or ≥ 24.5 (`NODE_USE_ENV_PROXY`).
 - **Not covered yet:** the JVM (Java SDKs ignore `HTTPS_PROXY`), and clients that ignore proxy
   variables. Between the agent and twokey, intercepted hosts speak HTTP/1.1 (HTTP/2-only clients

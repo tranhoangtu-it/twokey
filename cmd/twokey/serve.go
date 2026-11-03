@@ -83,7 +83,57 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 		fmt.Fprintf(os.Stderr, "twokey: ignoring NO_PROXY=%q so watched hosts cannot bypass the proxy\n", old)
 	}
 	cfg := runenv.Config{ProxyURL: "http://" + addr, CACert: a.CertPath(), Bundle: bundle}
-	return runenv.Vars(cfg), nil
+	vars := runenv.Vars(cfg)
+	if runtime.GOOS == "windows" {
+		if dir, err := curlHome(a.Dir()); err == nil {
+			vars = append(vars, runenv.KV{Key: "CURL_HOME", Value: dir})
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: curl config not written (%v); curl may reject intercepted hosts\n", err)
+		}
+	}
+	return vars, nil
+}
+
+// curlHome writes a curl config for the agent on Windows. Schannel curl
+// fails with CRYPT_E_NO_REVOCATION_CHECK on certificates from a local CA
+// (they have no CRL/OCSP endpoint); ssl-revoke-best-effort skips the check
+// only when it cannot be performed. The user's own curlrc is preserved.
+func curlHome(twokeyDir string) (string, error) {
+	dir := filepath.Join(twokeyDir, "curl")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	var user []byte
+	for _, p := range userCurlrcCandidates() {
+		if data, err := os.ReadFile(p); err == nil {
+			user = data
+			break
+		}
+	}
+	content := strings.TrimRight(string(user), "\r\n")
+	if content != "" {
+		content += "\n"
+	}
+	content += "# added by twokey: local-CA certificates have no revocation endpoint\nssl-revoke-best-effort\n"
+	if err := os.WriteFile(filepath.Join(dir, ".curlrc"), []byte(content), 0o600); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// userCurlrcCandidates mirrors curl's Windows lookup order.
+func userCurlrcCandidates() []string {
+	var dirs []string
+	for _, env := range []string{"CURL_HOME", "USERPROFILE", "APPDATA"} {
+		if d := os.Getenv(env); d != "" {
+			dirs = append(dirs, d)
+		}
+	}
+	var out []string
+	for _, d := range dirs {
+		out = append(out, filepath.Join(d, ".curlrc"), filepath.Join(d, "_curlrc"))
+	}
+	return out
 }
 
 func cmdRun(args []string) error {
@@ -240,7 +290,7 @@ func cmdDoctor(args []string) error {
 	}
 	probes := []probe{
 		{"curl", []string{"curl"}, []string{"-sS", "-o", os.DevNull, "-D", "-", probeURL},
-			"curl must honor CURL_CA_BUNDLE; on Windows (Schannel) run `twokey ca trust`"},
+			"on Windows (Schannel curl) run `twokey ca trust` once; twokey sets CURL_HOME for the revocation check"},
 		{"python", pythons, []string{"-c", "import urllib.request as u;r=u.urlopen('" + probeURL + "',timeout=20);print('x-twokey:',r.headers.get('X-Twokey'))"},
 			"Python must honor SSL_CERT_FILE / REQUESTS_CA_BUNDLE"},
 		{"node", []string{"node"}, []string{"-e", "fetch('" + probeURL + "').then(r=>console.log('x-twokey:',r.headers.get('x-twokey'))).catch(e=>{console.log('error:',(e.cause||e).message);process.exit(1)})"},

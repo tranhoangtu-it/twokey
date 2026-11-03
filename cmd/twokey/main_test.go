@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,26 @@ func TestRequireLoopback(t *testing.T) {
 		if err := requireLoopback(addr); (err == nil) != ok {
 			t.Errorf("requireLoopback(%q) err=%v, want ok=%v", addr, err, ok)
 		}
+	}
+}
+
+func TestCurlHomeKeepsUserConfigAndAddsRevokeBestEffort(t *testing.T) {
+	user := t.TempDir()
+	if err := os.WriteFile(filepath.Join(user, ".curlrc"), []byte("user-agent = \"me\"\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CURL_HOME", user)
+	dir, err := curlHome(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".curlrc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.HasPrefix(got, "user-agent = \"me\"\n") || !strings.HasSuffix(got, "ssl-revoke-best-effort\n") {
+		t.Fatalf("unexpected curlrc:\n%s", got)
 	}
 }
 
