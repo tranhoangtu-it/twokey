@@ -31,8 +31,11 @@ func parseAWSCall(req Request) *awsCall {
 	}
 
 	values, _ := url.ParseQuery(req.Query)
-	if strings.Contains(req.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-		if form, err := url.ParseQuery(string(req.Body)); err == nil {
+	// Query-protocol bodies are forms; don't trust Content-Type (raw HTTP
+	// clients may omit it). JSON/XML bodies are skipped.
+	body := bytes.TrimSpace(req.Body)
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' && body[0] != '<' {
+		if form, err := url.ParseQuery(string(body)); err == nil {
 			for k, v := range form {
 				values[k] = v
 			}

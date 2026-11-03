@@ -42,6 +42,7 @@ func (r Request) ConfirmText() string {
 		if token == "" {
 			token = m.Operation
 		}
+		token = NormalizeSpace(Clean(token))
 		if !seen[token] {
 			seen[token] = true
 			parts = append(parts, token)
@@ -53,17 +54,31 @@ func (r Request) ConfirmText() string {
 	return strings.Join(parts, " ")
 }
 
+// Clean replaces control characters (including ESC, so ANSI sequences are
+// defused) in request-derived strings before they are shown to a human.
+func Clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			return '?'
+		}
+		return r
+	}, s)
+}
+
+// NormalizeSpace collapses runs of whitespace to single spaces.
+func NormalizeSpace(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // Summary is a one-line description for notifications and logs.
 func (r Request) Summary() string {
 	if len(r.Matches) == 0 {
-		return fmt.Sprintf("uninspectable %s %s", r.Method, r.URL)
+		return Clean(fmt.Sprintf("uninspectable %s %s", r.Method, r.URL))
 	}
 	m := r.Matches[0]
 	target := m.Resource
 	if target == "" {
 		target = "unknown resource"
 	}
-	s := fmt.Sprintf("%s %s on %s", m.Provider, m.Operation, target)
+	s := Clean(fmt.Sprintf("%s %s on %s", m.Provider, m.Operation, target))
 	if n := len(r.Matches) - 1; n > 0 {
 		s += fmt.Sprintf(" (+%d more)", n)
 	}
@@ -123,8 +138,10 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	notifiers := append([]Notifier(nil), b.notifiers...)
 	b.mu.Unlock()
 
+	// Synchronous so the prompt always precedes the outcome; notifiers that
+	// do network I/O must not block here (ntfy publishes in a goroutine).
 	for _, n := range notifiers {
-		go n.Notify(req)
+		n.Notify(req)
 	}
 
 	var d Decision
@@ -138,7 +155,7 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 		d = b.expire(e, Decision{By: "client", Reason: "client went away"})
 	}
 	for _, n := range notifiers {
-		go n.Closed(req, d)
+		n.Closed(req, d)
 	}
 	return req, d
 }

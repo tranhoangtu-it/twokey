@@ -1,30 +1,38 @@
 provider: railway
 docs: https://docs.railway.com/reference/public-api
+# Paths use /graphql/{endpoint}: the CLI uses /graphql/v2, the dashboard /graphql/internal.
 rules:
   - id: railway.volume.delete
     hosts: [backboard.railway.com, backboard.railway.app]
-    path: /graphql/v2
+    path: /graphql/{endpoint}
     graphql: { mutations: [volumeDelete] }
     resource: "{volumeId}"
     severity: critical
     message: Deletes a Railway volume. This is the call behind the April 2026 PocketOS production wipe.
+  - id: railway.volume-backup.delete
+    hosts: [backboard.railway.com, backboard.railway.app]
+    path: /graphql/{endpoint}
+    graphql: { mutations: [volumeInstanceBackupDelete] }
+    resource: "{volumeInstanceBackupId}"
+    severity: critical
+    message: Deletes a Railway volume backup.
   - id: railway.project.delete
     hosts: [backboard.railway.com, backboard.railway.app]
-    path: /graphql/v2
+    path: /graphql/{endpoint}
     graphql: { mutations: [projectDelete] }
     resource: "{id}"
     severity: critical
     message: Deletes an entire Railway project with all its services and volumes.
   - id: railway.environment.delete
     hosts: [backboard.railway.com, backboard.railway.app]
-    path: /graphql/v2
+    path: /graphql/{endpoint}
     graphql: { mutations: [environmentDelete] }
     resource: "{id}"
     severity: critical
     message: Deletes a Railway environment and everything deployed in it.
   - id: railway.service.delete
     hosts: [backboard.railway.com, backboard.railway.app]
-    path: /graphql/v2
+    path: /graphql/{endpoint}
     graphql: { mutations: [serviceDelete] }
     resource: "{id}"
     severity: high

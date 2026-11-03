@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -22,7 +23,10 @@ type Rule struct {
 	Hosts    []string      `yaml:"hosts"`
 	Methods  []string      `yaml:"methods"`
 	Path     string        `yaml:"path"`
-	GraphQL  *GraphQLMatch `yaml:"graphql"`
+	// UnlessQuery skips the rule when any of these query keys is present,
+	// e.g. S3 "DELETE /?policy" deletes a bucket policy, not the bucket.
+	UnlessQuery []string      `yaml:"unless_query"`
+	GraphQL     *GraphQLMatch `yaml:"graphql"`
 	AWS      *AWSMatch     `yaml:"aws"`
 	Resource string        `yaml:"resource"`
 	Severity string        `yaml:"severity"`
@@ -220,6 +224,9 @@ func (e *Engine) Evaluate(req Request) Verdict {
 		if len(r.Methods) > 0 && !contains(r.Methods, method) {
 			continue
 		}
+		if len(r.UnlessQuery) > 0 && hasAnyQueryKey(req.Query, r.UnlessQuery) {
+			continue
+		}
 		vars := map[string]string{"host": host}
 		if r.tpl != nil {
 			captured, ok := r.tpl.match(req.Path)
@@ -320,6 +327,21 @@ func normalizeHost(host string) string {
 	}
 	// "api.github.com." is the same host as "api.github.com" (FQDN form).
 	return strings.TrimRight(h, ".")
+}
+
+// hasAnyQueryKey reports whether rawQuery contains any of keys (S3-style
+// subresources may have no value: "?policy").
+func hasAnyQueryKey(rawQuery string, keys []string) bool {
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return false // unparseable: don't let it disable a rule
+	}
+	for _, k := range keys {
+		if q.Has(k) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeVars(a, b map[string]string) map[string]string {

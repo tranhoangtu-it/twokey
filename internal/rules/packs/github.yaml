@@ -33,6 +33,13 @@ rules:
     hosts: [api.github.com]
     path: /graphql
     graphql: { mutations: [deleteRef, deleteIssue, deleteProjectV2] }
-    resource: "{input.id}"
+    resource: "{input.issueId|input.refId|input.projectId}"
     severity: high
     message: Destructive GitHub GraphQL mutation.
+  - id: github.repo.transfer
+    hosts: [api.github.com]
+    methods: [POST]
+    path: /repos/{owner}/{repo}/transfer
+    resource: "{owner}/{repo}"
+    severity: high
+    message: Transfers a repository to another owner.

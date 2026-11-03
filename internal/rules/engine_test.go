@@ -147,6 +147,48 @@ func TestEvaluate(t *testing.T) {
 			wantRule: "github.repo.delete", wantResource: "acme/api",
 		},
 		{
+			name: "railway dashboard endpoint /graphql/internal",
+			req: Request{Method: "POST", Host: "backboard.railway.com", Path: "/graphql/internal", Header: jsonCT,
+				Body: []byte(`{"query":"mutation { projectDelete(id: \"p1\") }"}`)},
+			wantRule: "railway.project.delete", wantResource: "p1",
+		},
+		{
+			name: "dynamodb account-based endpoint",
+			req: Request{Method: "POST", Host: "123456789012.ddb.us-east-1.amazonaws.com", Path: "/",
+				Header: hdr("X-Amz-Target", "DynamoDB_20120810.DeleteTable"), Body: []byte(`{"TableName":"orders"}`)},
+			wantRule: "aws.dynamodb.delete", wantResource: "orders",
+		},
+		{
+			name:     "s3 legacy dash-region host",
+			req:      Request{Method: "DELETE", Host: "b.s3-us-west-2.amazonaws.com", Path: "/"},
+			wantRule: "aws.s3.delete-bucket", wantResource: "b.s3-us-west-2.amazonaws.com",
+		},
+		{
+			name:     "s3 legacy path-style host",
+			req:      Request{Method: "DELETE", Host: "s3-us-west-2.amazonaws.com", Path: "/b"},
+			wantRule: "aws.s3.delete-bucket-path-style", wantResource: "b",
+		},
+		{
+			name: "s3 bucket policy delete is not a bucket delete",
+			req:  Request{Method: "DELETE", Host: "b.s3.amazonaws.com", Path: "/", Query: "policy"},
+		},
+		{
+			name:     "s3 bucket delete with SDK x-id param is still held",
+			req:      Request{Method: "DELETE", Host: "b.s3.amazonaws.com", Path: "/", Query: "x-id=DeleteBucket"},
+			wantRule: "aws.s3.delete-bucket", wantResource: "b.s3.amazonaws.com",
+		},
+		{
+			name:     "aws query form without content-type",
+			req:      Request{Method: "POST", Host: "rds.eu-west-1.amazonaws.com", Path: "/", Body: []byte("Action=DeleteDBCluster&DBClusterIdentifier=c1")},
+			wantRule: "aws.rds.delete", wantResource: "c1",
+		},
+		{
+			name: "github deleteIssue resource",
+			req: Request{Method: "POST", Host: "api.github.com", Path: "/graphql", Header: jsonCT,
+				Body: []byte(`{"query":"mutation($i: DeleteIssueInput!) { deleteIssue(input: $i) { clientMutationId } }","variables":{"i":{"issueId":"I_1"}}}`)},
+			wantRule: "github.graphql.delete", wantResource: "I_1",
+		},
+		{
 			name: "unwatched host passes",
 			req:  Request{Method: "DELETE", Host: "example.com", Path: "/repos/a/b"},
 		},

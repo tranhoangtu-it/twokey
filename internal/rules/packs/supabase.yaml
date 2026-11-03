@@ -15,3 +15,10 @@ rules:
     resource: "{branch}"
     severity: high
     message: Deletes a Supabase database branch.
+  - id: supabase.branch.reset
+    hosts: [api.supabase.com]
+    methods: [POST]
+    path: /v1/branches/{branch}/reset
+    resource: "{branch}"
+    severity: critical
+    message: Resets a Supabase database branch, wiping its data.

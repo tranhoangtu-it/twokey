@@ -76,9 +76,11 @@ func (n *Ntfy) Notify(r Request) {
 			{Action: "http", Label: "Approve", URL: reply, Method: "POST", Body: "approve " + r.ID + " " + r.Nonce, Clear: true},
 		},
 	}
-	if err := n.publish(msg); err != nil {
-		n.logf("ntfy: notify #%s failed: %v", r.ID, err)
-	}
+	go func() { // network I/O must not delay the broker or other channels
+		if err := n.publish(msg); err != nil {
+			n.logf("ntfy: notify #%s failed: %v", r.ID, err)
+		}
+	}()
 }
 
 // Closed is a no-op: tapping a button clears the notification on the phone.
@@ -109,14 +111,32 @@ func (n *Ntfy) publish(msg ntfyMessage) error {
 	return nil
 }
 
-// Listen subscribes to the reply topic until ctx ends, reconnecting on errors.
+const (
+	// idleLimit: ntfy sends a keepalive every ~45s; silence longer than this
+	// means a dead (half-open) connection.
+	idleLimit = 90 * time.Second
+	// healthyAfter: a connection that lived this long resets the backoff.
+	healthyAfter = time.Minute
+	maxBackoff   = 30 * time.Second
+)
+
+// Listen subscribes to the reply topic until ctx ends, reconnecting on
+// errors. Reconnects replay everything since the last event we saw, so a
+// tap made while the connection was silently dead is not lost.
 func (n *Ntfy) Listen(ctx context.Context) {
-	since := strconv.FormatInt(time.Now().Unix(), 10)
+	since := time.Now().Unix()
 	backoff := time.Second
 	for ctx.Err() == nil {
-		err := n.listenOnce(ctx, since)
+		started := time.Now()
+		last, err := n.listenOnce(ctx, since)
+		if last > since {
+			since = last
+		}
 		if ctx.Err() != nil {
 			return
+		}
+		if time.Since(started) > healthyAfter {
+			backoff = time.Second
 		}
 		n.logf("ntfy: subscription dropped (%v), retrying in %s", err, backoff)
 		select {
@@ -124,41 +144,54 @@ func (n *Ntfy) Listen(ctx context.Context) {
 			return
 		case <-time.After(backoff):
 		}
-		backoff = min(backoff*2, 30*time.Second)
-		// Only replay replies sent while we were disconnected.
-		since = strconv.FormatInt(time.Now().Add(-backoff).Unix(), 10)
+		backoff = min(backoff*2, maxBackoff)
 	}
 }
 
-func (n *Ntfy) listenOnce(ctx context.Context, since string) error {
-	url := n.server + "/" + n.replyTopic() + "/json?since=" + since
+// listenOnce streams replies; it returns the unix time of the last event
+// seen (message or keepalive) for replay on reconnect.
+func (n *Ntfy) listenOnce(ctx context.Context, since int64) (int64, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	watchdog := time.AfterFunc(idleLimit, cancel)
+	defer watchdog.Stop()
+
+	url := n.server + "/" + n.replyTopic() + "/json?since=" + strconv.FormatInt(since, 10)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return since, err
 	}
 	resp, err := n.client.Do(req)
 	if err != nil {
-		return err
+		return since, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("subscribe: %s", resp.Status)
+		return since, fmt.Errorf("subscribe: %s", resp.Status)
 	}
+	last := since
 	sc := bufio.NewScanner(resp.Body)
 	for sc.Scan() {
+		watchdog.Reset(idleLimit)
 		var ev struct {
 			Event   string `json:"event"`
+			Time    int64  `json:"time"`
 			Message string `json:"message"`
 		}
-		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.Event != "message" {
+		if json.Unmarshal(sc.Bytes(), &ev) != nil {
 			continue
 		}
-		n.handleReply(ev.Message)
+		if ev.Time > last {
+			last = ev.Time
+		}
+		if ev.Event == "message" {
+			n.handleReply(ev.Message)
+		}
 	}
 	if err := sc.Err(); err != nil {
-		return err
+		return last, err
 	}
-	return io.EOF
+	return last, io.EOF
 }
 
 // handleReply applies "approve <id> <nonce>" / "deny <id> <nonce>".

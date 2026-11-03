@@ -20,7 +20,8 @@ rules:
     severity: critical
     message: Terminates EC2 instances or deletes EBS volumes/snapshots.
   - id: aws.dynamodb.delete
-    hosts: ["dynamodb.*.amazonaws.com", "dynamodb-fips.*.amazonaws.com", "dynamodb.*.api.aws"]
+    # <account-id>.ddb.<region>.amazonaws.com is the account-based endpoint recent SDKs use.
+    hosts: ["dynamodb.*.amazonaws.com", "dynamodb-fips.*.amazonaws.com", "dynamodb.*.api.aws", "*.ddb.*.amazonaws.com"]
     aws: { actions: [DeleteTable, DeleteBackup] }
     resource: "{TableName|BackupArn}"
     severity: critical
@@ -31,17 +32,38 @@ rules:
     resource: "{StackName}"
     severity: critical
     message: Deletes a CloudFormation stack and every resource it manages.
+  - id: aws.secretsmanager.delete
+    hosts: ["secretsmanager.*.amazonaws.com", "secretsmanager-fips.*.amazonaws.com", "secretsmanager.*.api.aws"]
+    aws: { actions: [DeleteSecret] }
+    resource: "{SecretId}"
+    severity: critical
+    message: Deletes a Secrets Manager secret (immediately with ForceDeleteWithoutRecovery).
+  - id: aws.ecr.delete-repository
+    hosts: ["api.ecr.*.amazonaws.com", "ecr.*.amazonaws.com", "ecr-fips.*.amazonaws.com", "ecr.*.api.aws"]
+    aws: { actions: [DeleteRepository] }
+    resource: "{repositoryName}"
+    severity: critical
+    message: Deletes an ECR repository (all images when force=true).
+  - id: aws.route53.delete-hosted-zone
+    hosts: [route53.amazonaws.com]
+    methods: [DELETE]
+    path: /{version}/hostedzone/{zone}
+    resource: "{zone}"
+    severity: critical
+    message: Deletes a Route 53 hosted zone.
   - id: aws.s3.delete-bucket
-    hosts: ["*.s3.amazonaws.com", "*.s3.*.amazonaws.com"]
+    hosts: ["*.s3.amazonaws.com", "*.s3.*.amazonaws.com", "*.s3-*.amazonaws.com"]
     methods: [DELETE]
     path: /
+    unless_query: &s3subresources [policy, lifecycle, cors, website, tagging, encryption, replication, ownershipControls, publicAccessBlock, analytics, metrics, inventory, intelligent-tiering, metadataTable]
     resource: "{host}"
     severity: critical
     message: Deletes an S3 bucket (virtual-hosted style).
   - id: aws.s3.delete-bucket-path-style
-    hosts: [s3.amazonaws.com, "s3.*.amazonaws.com"]
+    hosts: [s3.amazonaws.com, "s3.*.amazonaws.com", "s3-*.amazonaws.com"]
     methods: [DELETE]
     path: /{bucket}
+    unless_query: *s3subresources
     resource: "{bucket}"
     severity: critical
     message: Deletes an S3 bucket (path style).

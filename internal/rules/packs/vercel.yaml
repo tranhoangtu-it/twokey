@@ -15,3 +15,10 @@ rules:
     resource: "{domain}"
     severity: high
     message: Removes a domain from the Vercel account.
+  - id: vercel.env.delete
+    hosts: [api.vercel.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/env/{id}
+    resource: "{project}/{id}"
+    severity: high
+    message: Deletes a project environment variable.

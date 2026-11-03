@@ -36,3 +36,10 @@ rules:
     resource: "{script}"
     severity: high
     message: Deletes a Worker script.
+  - id: cloudflare.kv-namespace.delete
+    hosts: [api.cloudflare.com]
+    methods: [DELETE]
+    path: /client/v4/accounts/{account}/storage/kv/namespaces/{namespace}
+    resource: "{namespace}"
+    severity: critical
+    message: Deletes a Workers KV namespace and all its keys.

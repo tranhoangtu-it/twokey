@@ -108,6 +108,51 @@ func TestBatchNeedsEveryResourceConfirmed(t *testing.T) {
 	}
 }
 
+func TestPromptIsSanitizedAndWhitespaceTolerant(t *testing.T) {
+	evil := "pg\x1b[2K\r   → approve 9 x\nprod  data"
+	if got := Clean(evil); strings.ContainsAny(got, "\x1b\r\n") {
+		t.Fatalf("control characters survived: %q", got)
+	}
+	b := NewBroker(5 * time.Second)
+	rec := newRecorder()
+	b.AddNotifier(rec)
+	var out strings.Builder
+	term := NewTerminal(b, &out)
+	res := make(chan Decision, 1)
+	go func() {
+		_, d := b.Decide(context.Background(), Request{Matches: []rules.Match{{Operation: "volumeDelete", Resource: "my   volume"}}})
+		res <- d
+	}()
+	held := <-rec.reqs
+	term.Notify(held)
+	if strings.Contains(out.String(), "\x1b") {
+		t.Fatal("terminal output contains ESC")
+	}
+	if msg := term.Handle("approve " + held.ID + " my volume"); msg != "" {
+		t.Fatalf("whitespace-normalized confirmation should approve, got %q", msg)
+	}
+	if d := <-res; !d.Approved {
+		t.Fatalf("want approval, got %+v", d)
+	}
+}
+
+func TestStaleIDDoesNotFallThrough(t *testing.T) {
+	b := NewBroker(5 * time.Second)
+	rec := newRecorder()
+	b.AddNotifier(rec)
+	term := NewTerminal(b, io.Discard)
+	res := decideAsync(b)
+	held := <-rec.reqs
+	if msg := term.Handle("deny 999"); !strings.Contains(msg, "no pending request #999") {
+		t.Fatalf("stale id must be reported, got %q", msg)
+	}
+	if _, ok := b.Get(held.ID); !ok {
+		t.Fatal("stale deny must not decide another request")
+	}
+	term.Handle("deny " + held.ID)
+	<-res
+}
+
 func TestNonceMustMatch(t *testing.T) {
 	b := NewBroker(5 * time.Second)
 	rec := newRecorder()

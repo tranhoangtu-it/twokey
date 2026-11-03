@@ -15,3 +15,10 @@ rules:
     resource: "{app}/{volume}"
     severity: critical
     message: Deletes a Fly.io volume and the data on it.
+  - id: fly.machine.delete
+    hosts: [api.machines.dev]
+    methods: [DELETE]
+    path: /v1/apps/{app}/machines/{machine}
+    resource: "{app}/{machine}"
+    severity: high
+    message: Permanently deletes a Fly Machine.

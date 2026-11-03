@@ -2,6 +2,7 @@ package approval
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -38,19 +39,21 @@ func (t *Terminal) printf(format string, args ...any) {
 // Notify prints a held request.
 func (t *Terminal) Notify(r Request) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n⏸  HOLD #%s  %s %s\n", r.ID, r.Method, r.URL)
+	// Everything request-derived goes through Clean: no ANSI or newlines
+	// that could fake a prompt line.
+	fmt.Fprintf(&b, "\n⏸  HOLD #%s  %s %s\n", r.ID, Clean(r.Method), Clean(r.URL))
 	for _, m := range r.Matches {
 		res := m.Resource
 		if res == "" {
 			res = "(unknown)"
 		}
-		fmt.Fprintf(&b, "   %-8s %s  operation=%s  resource=%s\n", strings.ToUpper(m.Severity), m.RuleID, m.Operation, res)
+		fmt.Fprintf(&b, "   %-8s %s  operation=%s  resource=%q\n", strings.ToUpper(m.Severity), m.RuleID, Clean(m.Operation), Clean(res))
 		if m.Message != "" {
 			fmt.Fprintf(&b, "            %s\n", m.Message)
 		}
 	}
 	if r.Uninspectable != "" {
-		fmt.Fprintf(&b, "   UNKNOWN  %s\n", r.Uninspectable)
+		fmt.Fprintf(&b, "   UNKNOWN  %s\n", Clean(r.Uninspectable))
 	}
 	fmt.Fprintf(&b, "   → approve %s %s     |     deny %s\n", r.ID, r.ConfirmText(), r.ID)
 	t.printf("%s", b.String())
@@ -68,12 +71,28 @@ func (t *Terminal) Closed(r Request, d Decision) {
 // Run reads commands until in is exhausted.
 func (t *Terminal) Run(in io.Reader) {
 	sc := bufio.NewScanner(in)
-	for sc.Scan() {
-		if msg := t.Handle(sc.Text()); msg != "" {
-			t.printf("   %s\n", msg)
+	sc.Buffer(make([]byte, 64*1024), maxCommandLine)
+	for {
+		for sc.Scan() {
+			if msg := t.Handle(sc.Text()); msg != "" {
+				t.printf("   %s\n", msg)
+			}
 		}
+		if !errors.Is(sc.Err(), bufio.ErrTooLong) {
+			if err := sc.Err(); err != nil {
+				t.printf("   approval input closed: %v (approve from your phone instead)\n", err)
+			}
+			return
+		}
+		// A giant paste must not silently kill approvals: report and resume.
+		t.printf("   line too long, ignored\n")
+		sc = bufio.NewScanner(in)
+		sc.Buffer(make([]byte, 64*1024), maxCommandLine)
 	}
 }
+
+// maxCommandLine caps one typed command (resource names can be long).
+const maxCommandLine = 1 << 20
 
 // Handle executes one command line and returns feedback for the user.
 func (t *Terminal) Handle(line string) string {
@@ -99,7 +118,7 @@ func (t *Terminal) Handle(line string) string {
 		return ""
 	}
 	want := req.ConfirmText()
-	if strings.Join(rest, " ") != want {
+	if NormalizeSpace(strings.Join(rest, " ")) != want {
 		return fmt.Sprintf("not approved: type the resource name exactly → approve %s %s", req.ID, want)
 	}
 	t.broker.Resolve(req.ID, Decision{Approved: true, By: "terminal", Reason: "approved with typed confirmation"})
@@ -112,6 +131,10 @@ func (t *Terminal) target(args []string) (Request, []string, string) {
 		if r, ok := t.broker.Get(args[0]); ok {
 			return r, args[1:], ""
 		}
+		if isNumber(args[0]) {
+			// A stale id must not silently fall through to another request.
+			return Request{}, nil, fmt.Sprintf("no pending request #%s (see `list`)", args[0])
+		}
 	}
 	pending := t.broker.Pending()
 	switch len(pending) {
@@ -122,6 +145,15 @@ func (t *Terminal) target(args []string) (Request, []string, string) {
 	default:
 		return Request{}, nil, "several requests pending; give the id (see `list`)"
 	}
+}
+
+func isNumber(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func (t *Terminal) list() string {
