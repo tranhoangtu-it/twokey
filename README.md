@@ -100,6 +100,37 @@ Fly.io, Cloudflare and DigitalOcean. Rules are small YAML files:
 Load your own with `--rules ./my-rules`. **Adding a provider is the best first PR** — see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Pre-approve what's safe in this project
+
+Put a `.twokey-allow.yaml` in the project directory (or pass `--allow FILE`) and matching
+operations go through without asking — still logged to the audit trail:
+
+```yaml
+allow:
+  - rule: vercel.project.delete
+    resource: "pr-*-preview"        # * matches anything, including "/"
+    reason: preview deployments are disposable
+  - rule: "postgres.truncate"
+    resource: "test_*"
+```
+
+Every entry needs an explicit `resource` (`"*"` to allow all); uninspectable requests are never
+pre-approved.
+
+## Guard a Postgres database
+
+Agents often talk to the database directly. Put twokey in between:
+
+```sh
+twokey pg --upstream db.internal:5432 --upstream-tls   # listens on 127.0.0.1:6543
+DATABASE_URL=postgres://user:pass@127.0.0.1:6543/app?sslmode=disable twokey run -- claude
+```
+
+`DROP …`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE` and `ALTER TABLE … DROP` are held —
+in simple and extended (prepared-statement) protocol, ignoring look-alikes inside strings,
+comments and dollar-quoted bodies. A denied statement returns a normal Postgres error to the
+agent and the session stays usable; the database never sees it.
+
 ## How it works
 
 `twokey run` sets `HTTPS_PROXY` plus CA-trust variables for each runtime
@@ -124,9 +155,11 @@ held — it fails closed.
   also gives curl a `CURL_HOME` config with `ssl-revoke-best-effort` (your own `.curlrc` is
   kept): Schannel otherwise rejects local-CA certificates, which have no revocation endpoint.
 - **Node:** needs ≥ 22.21 or ≥ 24.5 (`NODE_USE_ENV_PROXY`).
-- **Not covered yet:** the JVM (Java SDKs ignore `HTTPS_PROXY`), and clients that ignore proxy
-  variables. Between the agent and twokey, intercepted hosts speak HTTP/1.1 (HTTP/2-only clients
-  such as gRPC are not supported there).
+- **JVM:** `twokey run` sets `JAVA_TOOL_OPTIONS` (proxy properties + a PKCS#12 truststore with
+  the twokey CA), which covers `HttpURLConnection` and SDKs that honor the standard proxy
+  properties. `twokey doctor` checks it when `java` is installed.
+- **Not covered:** clients that ignore proxy settings entirely. Between the agent and twokey,
+  intercepted hosts speak HTTP/1.1 (HTTP/2-only clients such as gRPC are not supported there).
 
 ### Exit codes
 
@@ -143,8 +176,8 @@ backups somewhere a single API call can't reach. See [SECURITY.md](SECURITY.md).
 
 ## Roadmap
 
-Postgres wire protocol (`DROP`, `TRUNCATE`, `DELETE` without `WHERE`) · `--strict` sandbox mode ·
-JVM support · more providers · per-project allow rules.
+`--strict` sandbox mode (agent in a container whose only egress is twokey) · MySQL guard ·
+more providers.
 
 ## License
 

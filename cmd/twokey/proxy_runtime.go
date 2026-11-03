@@ -85,34 +85,10 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 		return nil, err
 	}
 
-	broker := approval.NewBroker(c.timeout)
-	var channels []string
-	if c.terminal {
-		term := approval.NewTerminal(broker, os.Stdout)
-		broker.AddNotifier(term)
-		go term.Run(os.Stdin)
-		channels = append(channels, `this window — type "approve <id> <resource>" or "deny <id>"`)
-	}
-	topic := c.ntfyTopic
-	if topic == "" && c.phone {
-		if topic, err = phoneTopic(authority.Dir(), false); err != nil {
-			auditLog.Close()
-			return nil, err
-		}
-	}
-	if topic != "" {
-		if len(topic) < 16 {
-			logger.Printf("warning: short ntfy topics are guessable; use `twokey phone`")
-		}
-		n := approval.NewNtfy(c.ntfyServer, topic, broker)
-		n.SetLogf(logger.Printf)
-		broker.AddNotifier(n)
-		go n.Listen(ctx)
-		channels = append(channels, fmt.Sprintf("phone — ntfy app subscribed to %s/%s", strings.TrimRight(c.ntfyServer, "/"), topic))
-	}
-	if len(channels) == 0 {
+	broker, channels, err := setupApprovals(ctx, c, authority.Dir(), logger)
+	if err != nil {
 		auditLog.Close()
-		return nil, errors.New("no approval channel: use the terminal (twokey up) or a phone (--phone, see `twokey phone`)")
+		return nil, err
 	}
 
 	ln, err := net.Listen("tcp", c.addr)
@@ -161,6 +137,40 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n  audit    %s\n", c.timeout, auditPath)
 	p.summary = b.String()
 	return p, nil
+}
+
+// setupApprovals builds the broker and its approval channels (terminal
+// and/or phone), shared by the HTTPS proxy and the Postgres guard.
+func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log.Logger) (*approval.Broker, []string, error) {
+	broker := approval.NewBroker(c.timeout)
+	var channels []string
+	if c.terminal {
+		term := approval.NewTerminal(broker, os.Stdout)
+		broker.AddNotifier(term)
+		go term.Run(os.Stdin)
+		channels = append(channels, `this window — type "approve <id> <resource>" or "deny <id>"`)
+	}
+	topic := c.ntfyTopic
+	if topic == "" && c.phone {
+		var err error
+		if topic, err = phoneTopic(home, false); err != nil {
+			return nil, nil, err
+		}
+	}
+	if topic != "" {
+		if len(topic) < 16 {
+			logger.Printf("warning: short ntfy topics are guessable; use `twokey phone`")
+		}
+		n := approval.NewNtfy(c.ntfyServer, topic, broker)
+		n.SetLogf(logger.Printf)
+		broker.AddNotifier(n)
+		go n.Listen(ctx)
+		channels = append(channels, fmt.Sprintf("phone — ntfy app subscribed to %s/%s", strings.TrimRight(c.ntfyServer, "/"), topic))
+	}
+	if len(channels) == 0 {
+		return nil, nil, errors.New("no approval channel: use the terminal or a phone (--phone, see `twokey phone`)")
+	}
+	return broker, channels, nil
 }
 
 // phoneTopic returns the persisted ntfy topic, creating it on first use.

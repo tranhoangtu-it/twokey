@@ -52,6 +52,7 @@ Usage:
   twokey up [--phone] [--timeout 2m]                   start the proxy + approval prompt
   twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
   twokey phone [--rotate]                              set up approvals on your phone (ntfy)
+  twokey pg --upstream HOST:5432 [--upstream-tls]      guard a Postgres database (DROP, TRUNCATE, …)
   twokey env [--shell sh|powershell]                   print the variables 'run' sets
   twokey doctor [--addr A]                             check curl/python/node/go are covered
   twokey replay <scenario> [--live]                    replay a real-world incident
@@ -112,6 +113,8 @@ func dispatch(args []string) error {
 		return cmdRules(rest)
 	case "ca":
 		return cmdCA(rest)
+	case "pg":
+		return cmdPG(rest)
 	case "phone":
 		return cmdPhone(rest)
 	case "version", "--version", "-v":
