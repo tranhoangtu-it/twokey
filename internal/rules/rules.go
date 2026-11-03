@@ -6,6 +6,7 @@
 package rules
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -205,7 +206,7 @@ func (e *Engine) Evaluate(req Request) Verdict {
 				gql, gqlErr = parseGraphQLBody(req)
 			}
 			if gqlErr != nil {
-				if method == http.MethodPost && v.Uninspectable == "" {
+				if !errors.Is(gqlErr, errNoPayload) && v.Uninspectable == "" {
 					v.Uninspectable = fmt.Sprintf("GraphQL request to %s could not be inspected: %v", host, gqlErr)
 				}
 				continue

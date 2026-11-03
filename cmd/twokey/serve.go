@@ -139,8 +139,11 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 		fmt.Fprintln(os.Stderr, "warning: no CA bundle yet; run `twokey ca init` (Python/curl trust)")
 		bundle = ""
 	}
+	if old := runenv.Lookup(os.Environ(), "NO_PROXY"); old != "" {
+		fmt.Fprintf(os.Stderr, "twokey: ignoring NO_PROXY=%q so watched hosts cannot bypass the proxy\n", old)
+	}
 	cfg := runenv.Config{ProxyURL: "http://" + addr, CACert: a.CertPath(), Bundle: bundle}
-	return runenv.Vars(cfg, runenv.Lookup(os.Environ(), "NO_PROXY")), nil
+	return runenv.Vars(cfg), nil
 }
 
 func cmdRun(args []string) error {

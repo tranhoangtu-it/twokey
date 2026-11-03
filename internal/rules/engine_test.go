@@ -1,7 +1,10 @@
 package rules
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +123,30 @@ func TestEvaluate(t *testing.T) {
 			wantRule: "neon.database.delete", wantResource: "p1/main/app",
 		},
 		{
+			name:     "GraphQL mutation over GET query string",
+			req:      Request{Method: "GET", Host: "backboard.railway.com", Path: "/graphql/v2", Query: url.Values{"query": {`mutation { volumeDelete(volumeId: "v7") }`}}.Encode()},
+			wantRule: "railway.volume.delete", wantResource: "v7",
+		},
+		{
+			name: "bare GET to GraphQL endpoint passes",
+			req:  Request{Method: "GET", Host: "backboard.railway.com", Path: "/graphql/v2"},
+		},
+		{
+			name: "empty POST to GraphQL endpoint passes",
+			req:  Request{Method: "POST", Host: "backboard.railway.com", Path: "/graphql/v2"},
+		},
+		{
+			name: "fragments nested too deep fail closed",
+			req: Request{Method: "POST", Host: "backboard.railway.com", Path: "/graphql/v2", Header: jsonCT,
+				Body: []byte(`{"query":"mutation { ...F0 } ` + deepFragments(12) + `"}`)},
+			uninspectable: true,
+		},
+		{
+			name:     "trailing-dot FQDN host is still matched",
+			req:      Request{Method: "DELETE", Host: "api.github.com.:443", Path: "/repos/acme/api"},
+			wantRule: "github.repo.delete", wantResource: "acme/api",
+		},
+		{
 			name: "unwatched host passes",
 			req:  Request{Method: "DELETE", Host: "example.com", Path: "/repos/a/b"},
 		},
@@ -149,6 +176,16 @@ func TestEvaluate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// deepFragments builds F0 -> F1 -> ... -> Fn, with a volumeDelete at the bottom.
+func deepFragments(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "fragment F%d on Mutation { ...F%d } ", i, i+1)
+	}
+	fmt.Fprintf(&b, `fragment F%d on Mutation { volumeDelete(volumeId: \"deep\") }`, n)
+	return b.String()
 }
 
 func TestHostWatched(t *testing.T) {

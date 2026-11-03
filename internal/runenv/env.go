@@ -20,13 +20,11 @@ type KV struct{ Key, Value string }
 // localBypass keeps local traffic (dev servers, the proxy itself) direct.
 const localBypass = "localhost,127.0.0.1,::1"
 
-// Vars returns the variables to set, in a stable order. existingNoProxy is
-// the caller's current NO_PROXY, which is preserved.
-func Vars(c Config, existingNoProxy string) []KV {
+// Vars returns the variables to set, in a stable order. Any existing
+// NO_PROXY is deliberately replaced: entries like ".amazonaws.com" would let
+// traffic to watched hosts bypass twokey entirely.
+func Vars(c Config) []KV {
 	noProxy := localBypass
-	if existingNoProxy != "" {
-		noProxy = existingNoProxy + "," + localBypass
-	}
 	vars := []KV{
 		{"HTTPS_PROXY", c.ProxyURL},
 		{"HTTP_PROXY", c.ProxyURL},

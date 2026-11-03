@@ -81,6 +81,33 @@ func TestTerminalDenyWithoutIDWhenSinglePending(t *testing.T) {
 	}
 }
 
+func TestBatchNeedsEveryResourceConfirmed(t *testing.T) {
+	r := Request{Matches: []rules.Match{
+		{Operation: "volumeDelete", Resource: "vol-a"},
+		{Operation: "volumeDelete", Resource: "vol-b"},
+		{Operation: "volumeDelete", Resource: "vol-a"},
+		{Operation: "projectDelete"},
+	}}
+	if got := r.ConfirmText(); got != "vol-a vol-b projectDelete" {
+		t.Fatalf("ConfirmText = %q", got)
+	}
+
+	b := NewBroker(5 * time.Second)
+	rec := newRecorder()
+	b.AddNotifier(rec)
+	term := NewTerminal(b, io.Discard)
+	out := make(chan Decision, 1)
+	go func() { _, d := b.Decide(context.Background(), r); out <- d }()
+	held := <-rec.reqs
+	if msg := term.Handle("approve " + held.ID + " vol-a"); !strings.Contains(msg, "not approved") {
+		t.Fatalf("typing only the first resource must not approve a batch: %q", msg)
+	}
+	term.Handle("approve " + held.ID + " vol-a vol-b projectDelete")
+	if d := <-out; !d.Approved {
+		t.Fatalf("full confirmation should approve, got %+v", d)
+	}
+}
+
 func TestNonceMustMatch(t *testing.T) {
 	b := NewBroker(5 * time.Second)
 	rec := newRecorder()

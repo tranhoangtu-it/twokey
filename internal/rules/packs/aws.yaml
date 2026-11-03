@@ -2,31 +2,31 @@ provider: aws
 docs: https://docs.aws.amazon.com/
 rules:
   - id: aws.rds.delete
-    hosts: ["rds.*.amazonaws.com", rds.amazonaws.com]
+    hosts: ["rds.*.amazonaws.com", rds.amazonaws.com, "rds-fips.*.amazonaws.com", "rds.*.api.aws"]
     aws: { actions: [DeleteDBInstance, DeleteDBCluster] }
     resource: "{DBInstanceIdentifier|DBClusterIdentifier}"
     severity: critical
     message: Deletes an RDS database. Check SkipFinalSnapshot before approving.
   - id: aws.rds.delete-snapshot
-    hosts: ["rds.*.amazonaws.com", rds.amazonaws.com]
+    hosts: ["rds.*.amazonaws.com", rds.amazonaws.com, "rds-fips.*.amazonaws.com", "rds.*.api.aws"]
     aws: { actions: [DeleteDBSnapshot, DeleteDBClusterSnapshot] }
     resource: "{DBSnapshotIdentifier|DBClusterSnapshotIdentifier}"
     severity: critical
     message: Deletes an RDS backup snapshot.
   - id: aws.ec2.terminate
-    hosts: ["ec2.*.amazonaws.com", ec2.amazonaws.com]
+    hosts: ["ec2.*.amazonaws.com", ec2.amazonaws.com, "ec2-fips.*.amazonaws.com", "ec2.*.api.aws"]
     aws: { actions: [TerminateInstances, DeleteVolume, DeleteSnapshot] }
     resource: "{InstanceId.1|VolumeId|SnapshotId}"
     severity: critical
     message: Terminates EC2 instances or deletes EBS volumes/snapshots.
   - id: aws.dynamodb.delete
-    hosts: ["dynamodb.*.amazonaws.com"]
+    hosts: ["dynamodb.*.amazonaws.com", "dynamodb-fips.*.amazonaws.com", "dynamodb.*.api.aws"]
     aws: { actions: [DeleteTable, DeleteBackup] }
     resource: "{TableName|BackupArn}"
     severity: critical
     message: Deletes a DynamoDB table or backup.
   - id: aws.cloudformation.delete-stack
-    hosts: ["cloudformation.*.amazonaws.com"]
+    hosts: ["cloudformation.*.amazonaws.com", "cloudformation-fips.*.amazonaws.com", "cloudformation.*.api.aws"]
     aws: { actions: [DeleteStack] }
     resource: "{StackName}"
     severity: critical
@@ -46,14 +46,14 @@ rules:
     severity: critical
     message: Deletes an S3 bucket (path style).
   - id: aws.lambda.delete-function
-    hosts: ["lambda.*.amazonaws.com"]
+    hosts: ["lambda.*.amazonaws.com", "lambda-fips.*.amazonaws.com", "lambda.*.api.aws"]
     methods: [DELETE]
     path: /{version}/functions/{function}
     resource: "{function}"
     severity: high
     message: Deletes a Lambda function.
   - id: aws.eks.delete-cluster
-    hosts: ["eks.*.amazonaws.com"]
+    hosts: ["eks.*.amazonaws.com", "eks-fips.*.amazonaws.com", "eks.*.api.aws"]
     methods: [DELETE]
     path: /clusters/{cluster}
     resource: "{cluster}"

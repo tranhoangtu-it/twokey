@@ -40,6 +40,8 @@ func NewNtfy(server, topic string, b *Broker) *Ntfy {
 	}
 }
 
+const publishTimeout = 15 * time.Second
+
 func (n *Ntfy) replyTopic() string { return n.topic + "-reply" }
 
 type ntfyAction struct {
@@ -87,7 +89,15 @@ func (n *Ntfy) publish(msg ntfyMessage) error {
 	if err != nil {
 		return err
 	}
-	resp, err := n.client.Post(n.server, "application/json", bytes.NewReader(body))
+	// Bounded so a hung ntfy server cannot pile up one goroutine per hold.
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.server, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := n.client.Do(req)
 	if err != nil {
 		return err
 	}

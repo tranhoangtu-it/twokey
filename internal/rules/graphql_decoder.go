@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 
 	"github.com/vektah/gqlparser/v2/ast"
@@ -28,32 +29,23 @@ type graphqlPayload struct {
 	Variables     map[string]any `json:"variables"`
 }
 
+// errNoPayload means the request carries no GraphQL operation at all (e.g. a
+// bare GET or an empty body), so there is nothing to hold.
+var errNoPayload = errors.New("no GraphQL payload")
+
+// maxFragmentDepth bounds fragment recursion on hostile input.
+const maxFragmentDepth = 10
+
 // parseGraphQLBody extracts every mutation field the request would execute.
-// It accepts a single JSON payload, a batched JSON array, or a raw
-// application/graphql body. Any request it cannot fully read is an error so
-// the caller can fail closed.
+// It accepts a single JSON payload, a batched JSON array, a raw
+// application/graphql body, or GraphQL-over-GET query parameters. Anything it
+// cannot fully read is an error (other than errNoPayload) so the caller can
+// fail closed.
 func parseGraphQLBody(req Request) (*graphqlCalls, error) {
-	body := bytes.TrimSpace(req.Body)
-	if len(body) == 0 {
-		return nil, errors.New("empty body")
+	payloads, err := graphqlPayloads(req)
+	if err != nil {
+		return nil, err
 	}
-
-	var payloads []graphqlPayload
-	switch body[0] {
-	case '{':
-		var p graphqlPayload
-		if err := json.Unmarshal(body, &p); err != nil {
-			return nil, fmt.Errorf("invalid JSON: %w", err)
-		}
-		payloads = []graphqlPayload{p}
-	case '[':
-		if err := json.Unmarshal(body, &payloads); err != nil {
-			return nil, fmt.Errorf("invalid JSON batch: %w", err)
-		}
-	default:
-		payloads = []graphqlPayload{{Query: string(body)}}
-	}
-
 	out := &graphqlCalls{}
 	for _, p := range payloads {
 		if p.Query == "" {
@@ -66,6 +58,54 @@ func parseGraphQLBody(req Request) (*graphqlCalls, error) {
 		out.mutations = append(out.mutations, calls...)
 	}
 	return out, nil
+}
+
+func graphqlPayloads(req Request) ([]graphqlPayload, error) {
+	body := bytes.TrimSpace(req.Body)
+	if len(body) == 0 {
+		p, err := payloadFromQuery(req.Query)
+		if err != nil {
+			return nil, err
+		}
+		return []graphqlPayload{p}, nil
+	}
+	switch body[0] {
+	case '{':
+		var p graphqlPayload
+		if err := json.Unmarshal(body, &p); err != nil {
+			return nil, fmt.Errorf("invalid JSON: %w", err)
+		}
+		return []graphqlPayload{p}, nil
+	case '[':
+		var ps []graphqlPayload
+		if err := json.Unmarshal(body, &ps); err != nil {
+			return nil, fmt.Errorf("invalid JSON batch: %w", err)
+		}
+		return ps, nil
+	default:
+		return []graphqlPayload{{Query: string(body)}}, nil
+	}
+}
+
+// payloadFromQuery reads GraphQL over GET: ?query=...&operationName=...&variables={...}
+func payloadFromQuery(rawQuery string) (graphqlPayload, error) {
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return graphqlPayload{}, fmt.Errorf("invalid query string: %w", err)
+	}
+	if q.Get("query") == "" {
+		if q.Has("extensions") {
+			return graphqlPayload{}, errors.New("no query text (persisted query?)")
+		}
+		return graphqlPayload{}, errNoPayload
+	}
+	p := graphqlPayload{Query: q.Get("query"), OperationName: q.Get("operationName")}
+	if v := q.Get("variables"); v != "" {
+		if err := json.Unmarshal([]byte(v), &p.Variables); err != nil {
+			return graphqlPayload{}, fmt.Errorf("invalid variables: %w", err)
+		}
+	}
+	return p, nil
 }
 
 func mutationCalls(p graphqlPayload) ([]gqlCall, error) {
@@ -82,18 +122,19 @@ func mutationCalls(p graphqlPayload) ([]gqlCall, error) {
 		if p.OperationName != "" && len(doc.Operations) > 1 && op.Name != p.OperationName {
 			continue
 		}
-		calls = appendFieldCalls(calls, op.SelectionSet, doc.Fragments, p.Variables, 0)
+		calls, err = appendFieldCalls(calls, op.SelectionSet, doc.Fragments, p.Variables, 0)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return calls, nil
 }
 
-// maxFragmentDepth bounds fragment recursion on hostile input.
-const maxFragmentDepth = 10
-
-func appendFieldCalls(calls []gqlCall, set ast.SelectionSet, frags ast.FragmentDefinitionList, vars map[string]any, depth int) []gqlCall {
+func appendFieldCalls(calls []gqlCall, set ast.SelectionSet, frags ast.FragmentDefinitionList, vars map[string]any, depth int) ([]gqlCall, error) {
 	if depth > maxFragmentDepth {
-		return calls
+		return nil, fmt.Errorf("fragments nested deeper than %d", maxFragmentDepth)
 	}
+	var err error
 	for _, sel := range set {
 		switch s := sel.(type) {
 		case *ast.Field:
@@ -103,14 +144,19 @@ func appendFieldCalls(calls []gqlCall, set ast.SelectionSet, frags ast.FragmentD
 			}
 			calls = append(calls, gqlCall{name: s.Name, args: args})
 		case *ast.InlineFragment:
-			calls = appendFieldCalls(calls, s.SelectionSet, frags, vars, depth+1)
+			calls, err = appendFieldCalls(calls, s.SelectionSet, frags, vars, depth+1)
 		case *ast.FragmentSpread:
-			if f := frags.ForName(s.Name); f != nil {
-				calls = appendFieldCalls(calls, f.SelectionSet, frags, vars, depth+1)
+			f := frags.ForName(s.Name)
+			if f == nil {
+				return nil, fmt.Errorf("unknown fragment %q", s.Name)
 			}
+			calls, err = appendFieldCalls(calls, f.SelectionSet, frags, vars, depth+1)
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
-	return calls
+	return calls, nil
 }
 
 func flattenGraphQLValue(prefix string, v *ast.Value, vars map[string]any, out map[string]string) {
