@@ -199,6 +199,19 @@ func (b *Broker) resolve(id, nonce string, checkNonce bool, d Decision) bool {
 	return ok
 }
 
+// DenyAll denies every pending request (e.g. on shutdown) so waiting
+// agents get a clear 403 instead of a dropped connection. It returns how
+// many were denied.
+func (b *Broker) DenyAll(reason string) int {
+	n := 0
+	for _, r := range b.Pending() {
+		if b.Resolve(r.ID, Decision{By: "shutdown", Reason: reason}) {
+			n++
+		}
+	}
+	return n
+}
+
 // Get returns a pending request.
 func (b *Broker) Get(id string) (Request, bool) {
 	b.mu.Lock()

@@ -153,6 +153,23 @@ func TestStaleIDDoesNotFallThrough(t *testing.T) {
 	<-res
 }
 
+func TestDenyAllOnShutdown(t *testing.T) {
+	b := NewBroker(5 * time.Second)
+	rec := newRecorder()
+	b.AddNotifier(rec)
+	r1, r2 := decideAsync(b), decideAsync(b)
+	<-rec.reqs
+	<-rec.reqs
+	if n := b.DenyAll("bye"); n != 2 {
+		t.Fatalf("denied %d, want 2", n)
+	}
+	for _, r := range []<-chan Decision{r1, r2} {
+		if d := <-r; d.Approved || d.By != "shutdown" {
+			t.Fatalf("want shutdown denial, got %+v", d)
+		}
+	}
+}
+
 func TestNonceMustMatch(t *testing.T) {
 	b := NewBroker(5 * time.Second)
 	rec := newRecorder()

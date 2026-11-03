@@ -38,6 +38,8 @@ const (
 	handshakeTimeout = 15 * time.Second
 	// idleTimeout closes intercepted keep-alive connections nobody uses.
 	idleTimeout = 5 * time.Minute
+	// bodyIdleTimeout drops request bodies that stop arriving mid-upload.
+	bodyIdleTimeout = time.Minute
 )
 
 // Options configures a Server.
@@ -238,7 +240,7 @@ func (s *Server) intercept(client net.Conn, target string) {
 		}
 		var body *eofTracker
 		if req.Body != nil && req.Body != http.NoBody {
-			body = newEOFTracker(req.Body)
+			body = newEOFTracker(req.Body, tlsConn)
 			req.Body = body
 		}
 		resp := s.handle(req, host, clientWatcher(tlsConn, br, cancel))
@@ -518,16 +520,21 @@ func writeResponse(w io.Writer, req *http.Request, resp *http.Response) (mustClo
 // its consumer (the upstream transport) is finished with it.
 type eofTracker struct {
 	io.ReadCloser
+	conn      net.Conn // optional: extended deadline per read (stalled uploads)
 	eof       atomic.Bool
 	closeOnce sync.Once
 	closed    chan struct{}
 }
 
-func newEOFTracker(rc io.ReadCloser) *eofTracker {
-	return &eofTracker{ReadCloser: rc, closed: make(chan struct{})}
+func newEOFTracker(rc io.ReadCloser, conn net.Conn) *eofTracker {
+	return &eofTracker{ReadCloser: rc, conn: conn, closed: make(chan struct{})}
 }
 
 func (t *eofTracker) Read(p []byte) (int, error) {
+	if t.conn != nil {
+		// Activity-based: a long upload is fine, a silent one is dropped.
+		_ = t.conn.SetReadDeadline(time.Now().Add(bodyIdleTimeout))
+	}
 	n, err := t.ReadCloser.Read(p)
 	if err == io.EOF {
 		t.eof.Store(true)

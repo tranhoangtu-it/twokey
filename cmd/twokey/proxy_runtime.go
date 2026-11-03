@@ -25,6 +25,9 @@ const setupExitCode = 125
 
 const phoneTopicFile = "ntfy-topic"
 
+// shutdownGrace gives denied holds time to be written before exit.
+const shutdownGrace = 500 * time.Millisecond
+
 // proxyConfig is what `up` and `run --phone` need to serve.
 type proxyConfig struct {
 	addr       string
@@ -119,6 +122,9 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	}()
 	go func() {
 		<-ctx.Done()
+		if broker.DenyAll("twokey is shutting down") > 0 {
+			time.Sleep(shutdownGrace) // let the 403s reach the agents
+		}
 		_ = srv.Close()
 	}()
 
