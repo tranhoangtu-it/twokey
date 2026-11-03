@@ -44,6 +44,8 @@ const (
 	lockFile     = "ca.lock"
 	lockWait     = 10 * time.Second
 	lockStaleAge = 30 * time.Second
+	// maxCachedLeaves bounds the leaf certificate cache.
+	maxCachedLeaves = 1024
 )
 
 // LoadOrCreate loads the CA from dir, generating a new one if absent.
@@ -72,11 +74,11 @@ func LoadOrCreate(dir string, permitted ...string) (a *Authority, created bool, 
 				return nil, false, err
 			}
 			created = created || ok
-		case !lockHeld(dir):
-			return nil, false, fmt.Errorf("incomplete CA in %s (run `twokey ca reset`): %v %v", dir, certErr, keyErr)
 		}
+		// Partial state (one file present) is normally another process
+		// mid-write; re-read until the deadline before calling it broken.
 		if time.Now().After(deadline) {
-			return nil, false, fmt.Errorf("timed out waiting for another twokey process to create the CA in %s", dir)
+			return nil, false, fmt.Errorf("incomplete CA in %s (run `twokey ca reset`): cert=%v key=%v", dir, certErr, keyErr)
 		}
 		if !created {
 			time.Sleep(50 * time.Millisecond)
@@ -101,6 +103,14 @@ func createLocked(dir string, permitted []string) (bool, error) {
 	f.Close()
 	defer os.Remove(lock)
 
+	// Another process may have finished between our read and taking the
+	// lock: never overwrite an existing CA.
+	if _, err := os.Stat(filepath.Join(dir, certFile)); err == nil {
+		return false, nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, keyFile)); err == nil {
+		return false, nil
+	}
 	certPEM, keyPEM, err := generateRoot(permitted)
 	if err != nil {
 		return false, err
@@ -113,11 +123,6 @@ func createLocked(dir string, permitted []string) (bool, error) {
 		return false, err
 	}
 	return true, nil
-}
-
-func lockHeld(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, lockFile))
-	return err == nil
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
@@ -182,10 +187,14 @@ func (a *Authority) Dir() string { return a.dir }
 
 // LeafFor returns a certificate for host (DNS name or IP), signed by the CA.
 func (a *Authority) LeafFor(host string) (*tls.Certificate, error) {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if c, ok := a.leaves[host]; ok && time.Until(c.Leaf.NotAfter) > time.Hour {
 		return c, nil
+	}
+	if len(a.leaves) >= maxCachedLeaves {
+		a.leaves = map[string]*tls.Certificate{} // wildcard rules can mint many hosts
 	}
 	if !a.Permits(host) {
 		return nil, fmt.Errorf("host %q is outside the CA's name constraints; run `twokey ca reset`", host)

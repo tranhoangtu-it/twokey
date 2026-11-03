@@ -46,7 +46,8 @@ func (a *Authority) EnsureBundle(ctx context.Context) (string, error) {
 	bundle := bytes.Join([][]byte{bytes.TrimSpace(roots), bytes.TrimSpace(a.certPEM)}, []byte("\n"))
 	bundle = append(bundle, '\n')
 	path := filepath.Join(a.dir, bundleFile)
-	if err := os.WriteFile(path, bundle, 0o644); err != nil {
+	// Atomic: running agents may be reading SSL_CERT_FILE right now.
+	if err := writeFileAtomic(path, bundle, 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -57,26 +58,36 @@ func (a *Authority) BundlePath() string { return filepath.Join(a.dir, bundleFile
 
 func (a *Authority) publicRoots(ctx context.Context) ([]byte, error) {
 	cached := filepath.Join(a.dir, rootsFile)
-	if data, err := os.ReadFile(cached); err == nil && countCerts(data) >= minPublicRoots {
-		return data, nil
+	cachedData, cacheErr := os.ReadFile(cached)
+	cacheUsable := cacheErr == nil && countCerts(cachedData) >= minPublicRoots
+	if info, err := os.Stat(cached); cacheUsable && err == nil && time.Since(info.ModTime()) < rootsMaxAge {
+		return cachedData, nil
 	}
 	for _, f := range systemRootFiles {
 		if data, err := os.ReadFile(f); err == nil && countCerts(data) >= minPublicRoots {
 			return data, nil
 		}
 	}
+	// The download is verified by Go's TLS stack against the OS trust store
+	// (curl.se is not an intercepted host), so it is authenticated.
 	data, err := fetchPublicRoots(ctx)
+	if err == nil && countCerts(data) < minPublicRoots {
+		err = fmt.Errorf("downloaded root store has only %d certificates", countCerts(data))
+	}
 	if err != nil {
+		if cacheUsable {
+			return cachedData, nil // stale but valid beats nothing
+		}
 		return nil, fmt.Errorf("no system PEM root store found and download failed: %w", err)
 	}
-	if n := countCerts(data); n < minPublicRoots {
-		return nil, fmt.Errorf("downloaded root store has only %d certificates", n)
-	}
-	if err := os.WriteFile(cached, data, 0o644); err != nil {
+	if err := writeFileAtomic(cached, data, 0o644); err != nil {
 		return nil, err
 	}
 	return data, nil
 }
+
+// rootsMaxAge triggers a refresh of the downloaded Mozilla root store.
+const rootsMaxAge = 30 * 24 * time.Hour
 
 func downloadCurlRoots(ctx context.Context) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

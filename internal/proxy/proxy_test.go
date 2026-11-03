@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -100,11 +102,26 @@ rules:
     severity: critical
 `
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, testPack) }
+
+func newHarnessWith(t *testing.T, packYAML string) *harness {
 	t.Helper()
 	h := &harness{}
 	h.upstream = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.upstreamHits.Add(1)
+		switch r.URL.Path {
+		case "/early": // reject an upload without reading it
+			w.Header().Set("Connection", "close")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		case "/304":
+			w.Header().Set("Content-Length", "10")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		case "/echo-x-foo":
+			w.Header().Set("Got-X-Foo", r.Header.Get("X-Foo"))
+			return
+		}
 		if r.Header.Get("Upgrade") == "websocket" {
 			conn, buf, err := w.(http.Hijacker).Hijack()
 			if err != nil {
@@ -121,7 +138,7 @@ func newHarness(t *testing.T) *harness {
 	h.upstream.EnableHTTP2 = false
 	t.Cleanup(h.upstream.Close)
 
-	pack, err := rules.ParsePack([]byte(testPack))
+	pack, err := rules.ParsePack([]byte(packYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,6 +325,140 @@ func TestWebSocketUpgradeOnWatchedHost(t *testing.T) {
 	_ = tc.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := io.ReadFull(br, buf); err != nil || string(buf) != "ping" {
 		t.Fatalf("echo through upgraded connection failed: %q %v", buf, err)
+	}
+}
+
+// restOnlyPack has no body rules, so uploads stream to the upstream instead
+// of being buffered — the case where an early upstream answer matters.
+const restOnlyPack = `
+provider: test
+rules:
+  - id: test.repo.delete
+    hosts: ["127.0.0.1"]
+    methods: [DELETE]
+    path: /repos/{owner}/{repo}
+`
+
+func TestEarlyUpstreamResponseClosesConnection(t *testing.T) {
+	h := newHarnessWith(t, restOnlyPack)
+	tc, br := h.rawTLS(t)
+	const size = 4 << 20
+	go func() {
+		fmt.Fprintf(tc, "POST /early HTTP/1.1\r\nHost: %s\r\nContent-Length: %d\r\n\r\n", h.upstream.Listener.Addr(), size)
+		_, _ = tc.Write(make([]byte, size)) // may fail once the proxy closes
+	}()
+	_ = tc.SetReadDeadline(time.Now().Add(10 * time.Second))
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("want 413, got %d", resp.StatusCode)
+	}
+	// The leftover upload must not be parsed as another request: the proxy
+	// has to close the connection instead of reusing it.
+	if _, err := http.ReadResponse(br, nil); err == nil {
+		t.Fatal("connection was reused after an unread request body")
+	}
+}
+
+func TestConnectionListedHeadersAreStripped(t *testing.T) {
+	h := newHarness(t)
+	tc, br := h.rawTLS(t)
+	fmt.Fprintf(tc, "GET /echo-x-foo HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive, X-Foo\r\nX-Foo: secret\r\n\r\n", h.upstream.Listener.Addr())
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Got-X-Foo"); got != "" {
+		t.Fatalf("hop-by-hop header named in Connection reached upstream: %q", got)
+	}
+}
+
+func TestNoBodyResponsesKeepConnectionUsable(t *testing.T) {
+	h := newHarness(t)
+	client := h.client("")
+	for _, step := range []struct{ method, path string }{
+		{"GET", "/304"}, {"HEAD", "/repos/a/b"}, {"GET", "/repos/a/b"}, {"GET", "/304"}, {"GET", "/repos/a/b"},
+	} {
+		req, _ := http.NewRequest(step.method, h.upstream.URL+step.path, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s %s: %v", step.method, step.path, err)
+		}
+		_, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+}
+
+func TestGzippedGraphQLMutationIsHeld(t *testing.T) {
+	h := newHarness(t)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(`{"query":"mutation { volumeDelete(volumeId: \"z1\") }"}`))
+	zw.Close()
+	req, _ := http.NewRequest("POST", h.upstream.URL+"/graphql", bytes.NewReader(buf.Bytes()))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	resp, err := h.client("").Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "z1") {
+		t.Fatalf("gzip-encoded mutation must be held, got %d %s", resp.StatusCode, body)
+	}
+}
+
+func TestSpliceForwardsHalfClose(t *testing.T) {
+	// upstream: read everything until EOF, then answer.
+	up, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	go func() {
+		c, err := up.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		data, _ := io.ReadAll(c)
+		_, _ = io.WriteString(c, "got:"+string(data))
+	}()
+	front, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer front.Close()
+	go func() {
+		c, err := front.Accept()
+		if err != nil {
+			return
+		}
+		u, err := net.Dial("tcp", up.Addr().String())
+		if err != nil {
+			return
+		}
+		splice(c, c, u)
+		c.Close()
+		u.Close()
+	}()
+
+	c, err := net.Dial("tcp", front.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_, _ = io.WriteString(c, "hello")
+	_ = c.(*net.TCPConn).CloseWrite()
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got, _ := io.ReadAll(c)
+	if string(got) != "got:hello" {
+		t.Fatalf("response lost after half-close: %q", got)
 	}
 }
 

@@ -7,6 +7,8 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -18,6 +20,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tranhoangtu-it/twokey/internal/approval"
@@ -117,7 +120,8 @@ func (s *Server) handleLocal(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	target := r.Host
 	if _, _, err := net.SplitHostPort(target); err != nil {
-		target = net.JoinHostPort(target, "443")
+		// No port; also handles bare IPv6 literals like "[::1]".
+		target = net.JoinHostPort(strings.Trim(target, "[]"), "443")
 	}
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -148,15 +152,38 @@ func (s *Server) tunnel(client net.Conn, target string) {
 	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		return
 	}
-	var once sync.Once
-	done := make(chan struct{})
-	pipe := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		once.Do(func() { close(done) })
+	splice(client, client, upstream)
+}
+
+// splice copies both directions until both are done. A clean EOF on one
+// side is forwarded as a half-close (CloseWrite) so the other direction can
+// finish — e.g. a client that sends its request and shuts its write side
+// still gets the full response. Errors tear down both sides.
+func splice(client net.Conn, clientReader io.Reader, upstream net.Conn) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	pipe := func(dst net.Conn, src io.Reader, srcConn net.Conn) {
+		defer wg.Done()
+		if _, err := io.Copy(dst, src); err != nil {
+			dst.Close()
+			srcConn.Close()
+			return
+		}
+		closeWrite(dst)
 	}
-	go pipe(upstream, client)
-	go pipe(client, upstream)
-	<-done
+	go pipe(upstream, clientReader, client)
+	go pipe(client, upstream, upstream)
+	wg.Wait()
+}
+
+func closeWrite(c net.Conn) {
+	if bc, ok := c.(*bufferedConn); ok {
+		c = bc.Conn
+	}
+	if cw, ok := c.(interface{ CloseWrite() error }); ok && cw.CloseWrite() == nil {
+		return
+	}
+	c.Close()
 }
 
 // intercept terminates TLS with a twokey-minted certificate and serves the
@@ -209,12 +236,21 @@ func (s *Server) intercept(client net.Conn, target string) {
 			cancel()
 			return
 		}
+		var body *eofTracker
+		if req.Body != nil && req.Body != http.NoBody {
+			body = &eofTracker{ReadCloser: req.Body}
+			req.Body = body
+		}
 		resp := s.handle(req, host, clientWatcher(tlsConn, br, cancel))
-		keepAlive := !req.Close && !resp.Close
-		err = writeResponse(tlsConn, req, resp)
+		mustClose, err := writeResponse(tlsConn, req, resp)
 		resp.Body.Close()
 		cancel()
-		if err != nil || !keepAlive {
+		// If the upstream answered before consuming the whole request body
+		// (early 401/413 on an upload), the rest of that body is still in br
+		// — and the transport may still be reading it. Never reuse the
+		// connection then, or the leftover bytes become the "next request".
+		bodyDone := body == nil || body.done()
+		if err != nil || mustClose || req.Close || resp.Close || !bodyDone {
 			return
 		}
 	}
@@ -246,15 +282,27 @@ func isTimeout(err error) bool {
 }
 
 func isUpgrade(req *http.Request) bool {
-	return req.Header.Get("Upgrade") != "" &&
-		strings.Contains(strings.ToLower(req.Header.Get("Connection")), "upgrade")
+	return req.Header.Get("Upgrade") != "" && connectionTokens(req.Header)["upgrade"]
+}
+
+// connectionTokens returns the lowercase tokens of every Connection header.
+func connectionTokens(h http.Header) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range h.Values("Connection") {
+		for _, tok := range strings.Split(v, ",") {
+			if tok = strings.ToLower(strings.TrimSpace(tok)); tok != "" {
+				out[tok] = true
+			}
+		}
+	}
+	return out
 }
 
 // upgrade handles WebSocket (and other Upgrade) requests on intercepted
 // hosts: rules are checked on the handshake, then bytes are spliced.
 func (s *Server) upgrade(client net.Conn, br *bufio.Reader, req *http.Request, host, target string) {
 	if resp := s.check(req, host, nil, nil); resp != nil {
-		_ = writeResponse(client, req, resp)
+		_, _ = writeResponse(client, req, resp)
 		return
 	}
 	cfg := s.upstreamTLS.Clone()
@@ -263,21 +311,19 @@ func (s *Server) upgrade(client net.Conn, br *bufio.Reader, req *http.Request, h
 	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: dialTimeout}, Config: cfg}
 	upstream, err := dialer.DialContext(req.Context(), "tcp", target)
 	if err != nil {
-		_ = writeResponse(client, req, jsonResponse(req, http.StatusBadGateway, errorBody("twokey_upstream_error", err.Error())))
+		_, _ = writeResponse(client, req, jsonResponse(req, http.StatusBadGateway, errorBody("twokey_upstream_error", err.Error())))
 		return
 	}
 	defer upstream.Close()
 	req.Header.Del("Proxy-Connection")
 	req.Header.Del("Proxy-Authorization")
+	if _, ok := req.Header["User-Agent"]; !ok {
+		req.Header["User-Agent"] = []string{""} // don't inject Go's default UA
+	}
 	if err := req.Write(upstream); err != nil {
 		return
 	}
-	var once sync.Once
-	done := make(chan struct{})
-	finish := func() { once.Do(func() { close(done) }) }
-	go func() { _, _ = io.Copy(upstream, br); finish() }()
-	go func() { _, _ = io.Copy(client, upstream); finish() }()
-	<-done
+	splice(client, br, upstream)
 }
 
 // handlePlain proxies absolute-form http:// requests. net/http cancels
@@ -318,10 +364,14 @@ func (s *Server) handle(req *http.Request, host string, watch func() func()) *ht
 // check evaluates req and, if it is destructive, holds it for a human.
 // It returns nil when the request may proceed, else the response to send.
 func (s *Server) check(req *http.Request, host string, body []byte, watch func() func()) *http.Response {
+	evalBody, decErr := decodeForInspection(req.Header.Get("Content-Encoding"), body)
 	v := s.engine.Evaluate(rules.Request{
 		Method: req.Method, Host: host, Path: req.URL.Path, Query: req.URL.RawQuery,
-		Header: req.Header, Body: body,
+		Header: req.Header, Body: evalBody,
 	})
+	if decErr != nil && !v.Hold() && s.engine.NeedsBody(host) {
+		v.Uninspectable = "request body could not be decoded for inspection: " + decErr.Error()
+	}
 	if !v.Hold() {
 		return nil
 	}
@@ -353,6 +403,35 @@ func (s *Server) check(req *http.Request, host string, body []byte, watch func()
 		return blockedResponse(req, held, d)
 	}
 	return nil
+}
+
+// decodeForInspection undoes Content-Encoding so rules see the real body;
+// the original bytes are what gets forwarded.
+func decodeForInspection(encoding string, body []byte) ([]byte, error) {
+	var r io.ReadCloser
+	var err error
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "", "identity":
+		return body, nil
+	case "gzip", "x-gzip":
+		r, err = gzip.NewReader(bytes.NewReader(body))
+	case "deflate":
+		r, err = zlib.NewReader(bytes.NewReader(body))
+	default:
+		return body, fmt.Errorf("unsupported Content-Encoding %q", encoding)
+	}
+	if err != nil {
+		return body, err
+	}
+	defer r.Close()
+	out, err := io.ReadAll(io.LimitReader(r, maxInspectBody+1))
+	if err != nil {
+		return body, err
+	}
+	if len(out) > maxInspectBody {
+		return body, errors.New("decoded body too large")
+	}
+	return out, nil
 }
 
 // bufferBody reads the whole request body (capped) and replaces it with an
@@ -396,25 +475,57 @@ var hopHeaders = []string{
 	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
 }
 
+// removeHopHeaders strips hop-by-hop headers, including any header named in
+// a Connection header (RFC 9110 §7.6.1).
 func removeHopHeaders(h http.Header) {
+	for tok := range connectionTokens(h) {
+		h.Del(tok)
+	}
 	for _, k := range hopHeaders {
 		h.Del(k)
 	}
 }
 
 // writeResponse serializes resp as HTTP/1.1 on the intercepted connection,
-// whatever protocol was used upstream (often HTTP/2).
-func writeResponse(w io.Writer, req *http.Request, resp *http.Response) error {
+// whatever protocol was used upstream (often HTTP/2). mustClose reports that
+// the connection cannot be reused after this response.
+func writeResponse(w io.Writer, req *http.Request, resp *http.Response) (mustClose bool, err error) {
 	resp.Proto, resp.ProtoMajor, resp.ProtoMinor = "HTTP/1.1", 1, 1
 	removeHopHeaders(resp.Header)
-	bodyAllowed := req.Method != http.MethodHead &&
-		resp.StatusCode >= 200 && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotModified
 	resp.TransferEncoding = nil
-	if bodyAllowed && resp.ContentLength < 0 {
+	switch {
+	case req.Method == http.MethodHead:
+		// Content-Length (if known) is echoed, no body is sent. With an
+		// unknown length Go announces "Connection: close"; honour it.
+		mustClose = resp.ContentLength < 0
+	case resp.StatusCode < 200 || resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotModified:
+		// These never carry a body, whatever Content-Length upstream sent.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		resp.Body = http.NoBody
+		resp.ContentLength = 0
+	case resp.ContentLength < 0:
 		resp.TransferEncoding = []string{"chunked"} // stream (e.g. SSE) without closing
 	}
-	return resp.Write(w)
+	resp.Close = resp.Close || mustClose
+	return resp.Close, resp.Write(w)
 }
+
+// eofTracker records whether a request body was read to the end.
+type eofTracker struct {
+	io.ReadCloser
+	eof atomic.Bool
+}
+
+func (t *eofTracker) Read(p []byte) (int, error) {
+	n, err := t.ReadCloser.Read(p)
+	if err == io.EOF {
+		t.eof.Store(true)
+	}
+	return n, err
+}
+
+func (t *eofTracker) done() bool { return t.eof.Load() }
 
 type flushWriter struct{ w http.ResponseWriter }
 
