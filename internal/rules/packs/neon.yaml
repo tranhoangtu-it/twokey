@@ -1,0 +1,24 @@
+provider: neon
+docs: https://api-docs.neon.tech/reference/getting-started-with-neon-api
+rules:
+  - id: neon.project.delete
+    hosts: [console.neon.tech]
+    methods: [DELETE]
+    path: /api/v2/projects/{project}
+    resource: "{project}"
+    severity: critical
+    message: Deletes a Neon project and all of its branches and databases.
+  - id: neon.branch.delete
+    hosts: [console.neon.tech]
+    methods: [DELETE]
+    path: /api/v2/projects/{project}/branches/{branch}
+    resource: "{project}/{branch}"
+    severity: high
+    message: Deletes a Neon branch.
+  - id: neon.database.delete
+    hosts: [console.neon.tech]
+    methods: [DELETE]
+    path: /api/v2/projects/{project}/branches/{branch}/databases/{database}
+    resource: "{project}/{branch}/{database}"
+    severity: critical
+    message: Drops a Neon database.

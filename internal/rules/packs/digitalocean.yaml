@@ -1,0 +1,24 @@
+provider: digitalocean
+docs: https://docs.digitalocean.com/reference/api/
+rules:
+  - id: digitalocean.database.delete
+    hosts: [api.digitalocean.com]
+    methods: [DELETE]
+    path: /v2/databases/{database}
+    resource: "{database}"
+    severity: critical
+    message: Destroys a managed database cluster.
+  - id: digitalocean.droplet.delete
+    hosts: [api.digitalocean.com]
+    methods: [DELETE]
+    path: /v2/droplets/{droplet}
+    resource: "{droplet}"
+    severity: critical
+    message: Destroys a Droplet.
+  - id: digitalocean.volume.delete
+    hosts: [api.digitalocean.com]
+    methods: [DELETE]
+    path: /v2/volumes/{volume}
+    resource: "{volume}"
+    severity: critical
+    message: Deletes a block storage volume.

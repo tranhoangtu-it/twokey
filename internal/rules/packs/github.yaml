@@ -1,0 +1,38 @@
+provider: github
+docs: https://docs.github.com/en/rest
+rules:
+  - id: github.repo.delete
+    hosts: [api.github.com]
+    methods: [DELETE]
+    path: /repos/{owner}/{repo}
+    resource: "{owner}/{repo}"
+    severity: critical
+    message: Permanently deletes a GitHub repository.
+  - id: github.org.delete
+    hosts: [api.github.com]
+    methods: [DELETE]
+    path: /orgs/{org}
+    resource: "{org}"
+    severity: critical
+    message: Deletes a GitHub organization and all of its repositories.
+  - id: github.ref.delete
+    hosts: [api.github.com]
+    methods: [DELETE]
+    path: /repos/{owner}/{repo}/git/refs/{ref...}
+    resource: "{owner}/{repo}:{ref}"
+    severity: high
+    message: Deletes a branch or tag.
+  - id: github.environment.delete
+    hosts: [api.github.com]
+    methods: [DELETE]
+    path: /repos/{owner}/{repo}/environments/{environment}
+    resource: "{owner}/{repo}:{environment}"
+    severity: high
+    message: Deletes a deployment environment and its secrets.
+  - id: github.graphql.delete
+    hosts: [api.github.com]
+    path: /graphql
+    graphql: { mutations: [deleteRef, deleteIssue, deleteProjectV2] }
+    resource: "{input.id}"
+    severity: high
+    message: Destructive GitHub GraphQL mutation.

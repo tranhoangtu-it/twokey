@@ -1,0 +1,17 @@
+provider: supabase
+docs: https://supabase.com/docs/reference/api
+rules:
+  - id: supabase.project.delete
+    hosts: [api.supabase.com]
+    methods: [DELETE]
+    path: /v1/projects/{ref}
+    resource: "{ref}"
+    severity: critical
+    message: Deletes a Supabase project including its Postgres database.
+  - id: supabase.branch.delete
+    hosts: [api.supabase.com]
+    methods: [DELETE]
+    path: /v1/branches/{branch}
+    resource: "{branch}"
+    severity: high
+    message: Deletes a Supabase database branch.

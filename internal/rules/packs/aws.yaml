@@ -1,0 +1,61 @@
+provider: aws
+docs: https://docs.aws.amazon.com/
+rules:
+  - id: aws.rds.delete
+    hosts: ["rds.*.amazonaws.com", rds.amazonaws.com]
+    aws: { actions: [DeleteDBInstance, DeleteDBCluster] }
+    resource: "{DBInstanceIdentifier|DBClusterIdentifier}"
+    severity: critical
+    message: Deletes an RDS database. Check SkipFinalSnapshot before approving.
+  - id: aws.rds.delete-snapshot
+    hosts: ["rds.*.amazonaws.com", rds.amazonaws.com]
+    aws: { actions: [DeleteDBSnapshot, DeleteDBClusterSnapshot] }
+    resource: "{DBSnapshotIdentifier|DBClusterSnapshotIdentifier}"
+    severity: critical
+    message: Deletes an RDS backup snapshot.
+  - id: aws.ec2.terminate
+    hosts: ["ec2.*.amazonaws.com", ec2.amazonaws.com]
+    aws: { actions: [TerminateInstances, DeleteVolume, DeleteSnapshot] }
+    resource: "{InstanceId.1|VolumeId|SnapshotId}"
+    severity: critical
+    message: Terminates EC2 instances or deletes EBS volumes/snapshots.
+  - id: aws.dynamodb.delete
+    hosts: ["dynamodb.*.amazonaws.com"]
+    aws: { actions: [DeleteTable, DeleteBackup] }
+    resource: "{TableName|BackupArn}"
+    severity: critical
+    message: Deletes a DynamoDB table or backup.
+  - id: aws.cloudformation.delete-stack
+    hosts: ["cloudformation.*.amazonaws.com"]
+    aws: { actions: [DeleteStack] }
+    resource: "{StackName}"
+    severity: critical
+    message: Deletes a CloudFormation stack and every resource it manages.
+  - id: aws.s3.delete-bucket
+    hosts: ["*.s3.amazonaws.com", "*.s3.*.amazonaws.com"]
+    methods: [DELETE]
+    path: /
+    resource: "{host}"
+    severity: critical
+    message: Deletes an S3 bucket (virtual-hosted style).
+  - id: aws.s3.delete-bucket-path-style
+    hosts: [s3.amazonaws.com, "s3.*.amazonaws.com"]
+    methods: [DELETE]
+    path: /{bucket}
+    resource: "{bucket}"
+    severity: critical
+    message: Deletes an S3 bucket (path style).
+  - id: aws.lambda.delete-function
+    hosts: ["lambda.*.amazonaws.com"]
+    methods: [DELETE]
+    path: /{version}/functions/{function}
+    resource: "{function}"
+    severity: high
+    message: Deletes a Lambda function.
+  - id: aws.eks.delete-cluster
+    hosts: ["eks.*.amazonaws.com"]
+    methods: [DELETE]
+    path: /clusters/{cluster}
+    resource: "{cluster}"
+    severity: critical
+    message: Deletes an EKS cluster.

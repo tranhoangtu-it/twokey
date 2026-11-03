@@ -1,0 +1,17 @@
+provider: fly
+docs: https://fly.io/docs/machines/api/
+rules:
+  - id: fly.app.delete
+    hosts: [api.machines.dev]
+    methods: [DELETE]
+    path: /v1/apps/{app}
+    resource: "{app}"
+    severity: critical
+    message: Deletes a Fly.io app with all its machines.
+  - id: fly.volume.delete
+    hosts: [api.machines.dev]
+    methods: [DELETE]
+    path: /v1/apps/{app}/volumes/{volume}
+    resource: "{app}/{volume}"
+    severity: critical
+    message: Deletes a Fly.io volume and the data on it.

@@ -1,0 +1,17 @@
+provider: vercel
+docs: https://vercel.com/docs/rest-api
+rules:
+  - id: vercel.project.delete
+    hosts: [api.vercel.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}
+    resource: "{project}"
+    severity: critical
+    message: Deletes a Vercel project with its deployments and env vars.
+  - id: vercel.domain.delete
+    hosts: [api.vercel.com]
+    methods: [DELETE]
+    path: /{version}/domains/{domain}
+    resource: "{domain}"
+    severity: high
+    message: Removes a domain from the Vercel account.
