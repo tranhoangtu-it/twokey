@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/x509"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 func TestLoadOrCreateIsStable(t *testing.T) {
@@ -101,6 +104,26 @@ func TestConcurrentCreateYieldsOneCA(t *testing.T) {
 				t.Fatal("concurrent starts produced different CAs")
 			}
 		}
+	}
+}
+
+func TestJavaTrustStoreRoundTrip(t *testing.T) {
+	a, _, err := LoadOrCreate(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := filepath.Join(t.TempDir(), "bundle.pem")
+	if err := os.WriteFile(bundle, a.CertPEM(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := a.WriteJavaTrustStore(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	certs, err := pkcs12.DecodeTrustStore(data, JavaTrustStorePassword)
+	if err != nil || len(certs) != 1 || !strings.HasPrefix(certs[0].Subject.CommonName, "twokey local CA") {
+		t.Fatalf("truststore round trip: %v %v", certs, err)
 	}
 }
 

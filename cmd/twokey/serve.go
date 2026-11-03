@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tranhoangtu-it/twokey/internal/ca"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
 	"github.com/tranhoangtu-it/twokey/internal/runenv"
 )
@@ -85,6 +86,16 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 	}
 	cfg := runenv.Config{ProxyURL: "http://" + addr, CACert: a.CertPath(), Bundle: bundle}
 	vars := runenv.Vars(cfg)
+	trustStore := ""
+	if bundle != "" {
+		if ts, err := a.WriteJavaTrustStore(bundle); err == nil {
+			trustStore = ts
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: Java truststore not written (%v); JVM tools may reject intercepted hosts\n", err)
+		}
+	}
+	vars = append(vars, runenv.KV{Key: "JAVA_TOOL_OPTIONS", Value: runenv.JavaToolOptions(
+		addr, trustStore, ca.JavaTrustStorePassword, os.Getenv("JAVA_TOOL_OPTIONS"))})
 	if runtime.GOOS == "windows" {
 		if dir, err := curlHome(a.Dir()); err == nil {
 			vars = append(vars, runenv.KV{Key: "CURL_HOME", Value: dir})
@@ -302,6 +313,11 @@ func cmdDoctor(args []string) error {
 			"Go uses the OS trust store on Windows/macOS: run `twokey ca trust`"},
 	}
 	failed := 0
+	if javaProbe, err := writeJavaProbe(); err == nil {
+		defer os.RemoveAll(filepath.Dir(javaProbe))
+		probes = append(probes, probe{"java (JVM SDKs)", []string{"java"}, []string{javaProbe},
+			"needs Java 11+; twokey sets JAVA_TOOL_OPTIONS (proxy + truststore)"})
+	}
 	for _, p := range probes {
 		ok, detail := runProbe(p, env)
 		switch {
@@ -319,6 +335,32 @@ func cmdDoctor(args []string) error {
 	}
 	fmt.Println("\nAll set. Try it: twokey replay pocketos --live")
 	return nil
+}
+
+// javaProbeSource uses HttpURLConnection, which honors the proxy system
+// properties set through JAVA_TOOL_OPTIONS.
+const javaProbeSource = `public class Probe {
+  public static void main(String[] a) throws Exception {
+    var c = (java.net.HttpURLConnection) new java.net.URL("` + probeURL + `").openConnection();
+    c.setConnectTimeout(20000); c.setReadTimeout(20000);
+    System.out.println("x-twokey: " + c.getHeaderField("X-Twokey"));
+  }
+}
+`
+
+// writeJavaProbe writes the probe to a fresh temp dir (single-file source
+// launch, Java 11+).
+func writeJavaProbe() (string, error) {
+	dir, err := os.MkdirTemp("", "twokey-doctor-")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "Probe.java")
+	if err := os.WriteFile(path, []byte(javaProbeSource), 0o600); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return path, nil
 }
 
 func runProbe(p probe, env []string) (bool, string) {
