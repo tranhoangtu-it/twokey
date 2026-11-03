@@ -55,6 +55,8 @@ type Options struct {
 	// UpstreamTLS configures raw TLS dials for Upgrade (WebSocket) requests.
 	// Defaults to the system roots.
 	UpstreamTLS *tls.Config
+	// Allow pre-approves matching operations (never uninspectable ones).
+	Allow []rules.Allow
 }
 
 // Server implements http.Handler for forward-proxy traffic.
@@ -67,6 +69,7 @@ type Server struct {
 	version     string
 	transport   http.RoundTripper
 	upstreamTLS *tls.Config
+	allow       []rules.Allow
 }
 
 // New builds a proxy server.
@@ -74,6 +77,7 @@ func New(o Options) *Server {
 	s := &Server{
 		engine: o.Engine, ca: o.CA, broker: o.Broker, audit: o.Audit,
 		logf: o.Logf, version: o.Version, transport: o.Transport, upstreamTLS: o.UpstreamTLS,
+		allow: o.Allow,
 	}
 	if s.upstreamTLS == nil {
 		s.upstreamTLS = &tls.Config{MinVersion: tls.VersionTLS12}
@@ -376,6 +380,15 @@ func (s *Server) check(req *http.Request, host string, body []byte, watch func()
 	})
 	if decErr != nil && !v.Hold() && s.engine.NeedsBody(host) {
 		v.Uninspectable = "request body could not be decoded for inspection: " + decErr.Error()
+	}
+	v, allowed := rules.ApplyAllow(v, s.allow)
+	if len(allowed) > 0 {
+		if err := s.audit.Write(audit.Entry{
+			Time: time.Now(), Method: req.Method, URL: displayURL(req), Matches: allowed,
+			Approved: true, By: "allowlist", Reason: "pre-approved by allow rules",
+		}); err != nil {
+			s.logf("audit log write failed: %v", err)
+		}
 	}
 	if !v.Hold() {
 		return nil

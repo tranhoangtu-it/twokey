@@ -33,6 +33,7 @@ func cmdUp(args []string) error {
 	phone := fs.Bool("phone", false, "also approve from your phone (see `twokey phone`)")
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic (default: the one from `twokey phone`)")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
+	allow := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -40,7 +41,7 @@ func cmdUp(args []string) error {
 	defer stop()
 	p, err := startProxy(ctx, proxyConfig{
 		addr: *addr, timeout: *timeout, rulesDir: *rulesDir, phone: *phone,
-		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr,
+		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr, allowFile: *allow,
 	})
 	if err != nil {
 		return err
@@ -142,6 +143,7 @@ func cmdRun(args []string) error {
 	phone := fs.Bool("phone", false, "one-terminal mode: start the proxy in-process, approve on your phone")
 	timeout := fs.Duration("timeout", 2*time.Minute, "with --phone: deny holds nobody answers within this time")
 	rulesDir := fs.String("rules", "", "with --phone: extra rule pack directory")
+	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+")")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -170,6 +172,7 @@ func cmdRun(args []string) error {
 			addr: "127.0.0.1:0", timeout: *timeout, rulesDir: *rulesDir, phone: true,
 			ntfyTopic: os.Getenv("TWOKEY_NTFY_TOPIC"), ntfyServer: envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"),
 			logTo: logFile, // keep diagnostics out of the agent's TUI
+			allowFile: *allow,
 		})
 		if err != nil {
 			return setupFailure(err)

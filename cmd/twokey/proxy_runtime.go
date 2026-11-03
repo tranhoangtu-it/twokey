@@ -17,6 +17,7 @@ import (
 	"github.com/tranhoangtu-it/twokey/internal/approval"
 	"github.com/tranhoangtu-it/twokey/internal/audit"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
+	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
 
 // setupExitCode distinguishes twokey's own failures in `run` from the
@@ -38,7 +39,11 @@ type proxyConfig struct {
 	ntfyServer string
 	terminal   bool      // approvals typed into this process's stdin
 	logTo      io.Writer // where proxy diagnostics go
+	allowFile  string    // pre-approved operations (default: ./.twokey-allow.yaml if present)
 }
+
+// defaultAllowFile is picked up from the current (project) directory.
+const defaultAllowFile = ".twokey-allow.yaml"
 
 type runningProxy struct {
 	addr    string
@@ -60,6 +65,17 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 		return nil, err
 	}
 	logger := log.New(c.logTo, "twokey: ", log.LstdFlags)
+	allowPath := c.allowFile
+	if allowPath == "" {
+		allowPath = defaultAllowFile
+	}
+	allows, err := rules.LoadAllow(allowPath)
+	if err != nil {
+		return nil, fmt.Errorf("allow rules %s: %w", allowPath, err)
+	}
+	if c.allowFile != "" && allows == nil {
+		return nil, fmt.Errorf("allow rules %s: file not found or empty", allowPath)
+	}
 	if _, err := authority.EnsureBundle(ctx); err != nil {
 		logger.Printf("warning: could not build CA bundle (%v); Python/curl may reject intercepted hosts", err)
 	}
@@ -107,6 +123,7 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	srv := &http.Server{
 		Handler: proxy.New(proxy.Options{
 			Engine: engine, CA: authority, Broker: broker, Audit: auditLog, Version: version, Logf: logger.Printf,
+			Allow: allows,
 		}),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          logger,
@@ -137,6 +154,9 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	fmt.Fprintf(&b, "  rules    %d destructive operations across %d providers (only those hosts are inspected)\n", len(rules), len(providers))
 	for _, ch := range channels {
 		fmt.Fprintf(&b, "  approve  %s\n", ch)
+	}
+	if len(allows) > 0 {
+		fmt.Fprintf(&b, "  allow    %d pre-approved operation(s) from %s\n", len(allows), allowPath)
 	}
 	fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n  audit    %s\n", c.timeout, auditPath)
 	p.summary = b.String()
