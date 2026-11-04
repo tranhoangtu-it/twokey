@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,7 +28,7 @@ type dbGuard struct {
 
 var (
 	postgresGuard = dbGuard{"pg", "Postgres", "127.0.0.1:6543", "DATABASE_URL=postgres://USER:PASS@%s/DB?sslmode=disable", true}
-	mysqlGuard    = dbGuard{"mysql", "MySQL", "127.0.0.1:3307", "DATABASE_URL=mysql://USER:PASS@%s/DB   (or: mysql -h 127.0.0.1 -P PORT)", false}
+	mysqlGuard    = dbGuard{"mysql", "MySQL", "127.0.0.1:3307", "DATABASE_URL=mysql://USER:PASS@%s/DB   (or: mysql -h 127.0.0.1 -P PORT)", true}
 )
 
 func cmdPG(args []string) error    { return cmdDBGuard(postgresGuard, args) }
@@ -42,7 +43,8 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	fs := flag.NewFlagSet(g.cmd, flag.ContinueOnError)
 	upstream := fs.String("upstream", "", "real "+g.name+" host:port (required)")
 	listen := fs.String("listen", g.defaultListen, "local address the agent connects to (loopback only)")
-	upstreamTLS := fs.Bool("upstream-tls", false, "use TLS to the upstream (Postgres only; managed Postgres usually needs this)")
+	upstreamTLS := fs.Bool("upstream-tls", false, "use TLS to the upstream, verifying its certificate (managed databases usually need this)")
+	skipVerify := fs.Bool("upstream-tls-skip-verify", false, "use TLS to the upstream without verifying its certificate (like sslmode=require)")
 	timeout := fs.Duration("timeout", 2*time.Minute, "deny holds nobody answers within this time")
 	phone := fs.Bool("phone", false, "also approve from your phone (see `twokey phone`)")
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic")
@@ -54,11 +56,17 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	if *upstream == "" {
 		return fmt.Errorf("usage: twokey %s --upstream db.example.com:PORT [--listen %s]", g.cmd, g.defaultListen)
 	}
-	if *upstreamTLS && !g.tls {
-		return errors.New("--upstream-tls is not supported for MySQL yet: run the guard next to the database or through an SSH tunnel")
+	useTLS := *upstreamTLS || *skipVerify
+	if useTLS && !g.tls {
+		return errors.New("--upstream-tls is not supported for " + g.name)
 	}
-	if _, _, err := net.SplitHostPort(*upstream); err != nil {
+	upHost, _, err := net.SplitHostPort(*upstream)
+	if err != nil {
 		return fmt.Errorf("bad --upstream %q (want host:port): %w", *upstream, err)
+	}
+	var tlsConfig *tls.Config
+	if useTLS {
+		tlsConfig = &tls.Config{ServerName: upHost, MinVersion: tls.VersionTLS12, InsecureSkipVerify: *skipVerify} //nolint:gosec // explicit opt-in flag
 	}
 	if err := requireLoopback(*listen); err != nil {
 		return err
@@ -102,10 +110,11 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	if g.cmd == mysqlGuard.cmd {
 		srv = myguard.New(myguard.Options{
 			Upstream: *upstream, Broker: broker, Audit: auditLog, Allow: allows, Logf: logger.Printf,
+			UpstreamTLS: useTLS, TLSConfig: tlsConfig,
 		})
 	} else {
 		srv = pgguard.New(pgguard.Options{
-			Upstream: *upstream, UpstreamTLS: *upstreamTLS, Broker: broker, Audit: auditLog,
+			Upstream: *upstream, UpstreamTLS: useTLS, TLSConfig: tlsConfig, Broker: broker, Audit: auditLog,
 			Allow: allows, Logf: logger.Printf,
 		})
 	}

@@ -60,8 +60,8 @@ func TestClearSSLCapabilityReturnsServerCaps(t *testing.T) {
 	p = append(p, upper...)
 
 	caps := clearSSLCapability(p)
-	if caps&clientSSL != 0 {
-		t.Fatal("CLIENT_SSL must be cleared")
+	if caps&clientSSL == 0 {
+		t.Fatal("the server's original caps (incl. CLIENT_SSL) must be reported for upstream TLS")
 	}
 	if caps&clientQueryAttributes == 0 {
 		t.Fatal("upper capability flags must be read")

@@ -1,0 +1,10 @@
+provider: upstash
+docs: https://upstash.com/docs/devops/developer-api/introduction
+rules:
+  - id: upstash.redis.delete
+    hosts: [api.upstash.com]
+    methods: [DELETE]
+    path: /v2/redis/database/{database}
+    resource: "{database}"
+    severity: critical
+    message: Deletes an Upstash Redis database.

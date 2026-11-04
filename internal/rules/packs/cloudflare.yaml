@@ -43,3 +43,10 @@ rules:
     resource: "{namespace}"
     severity: critical
     message: Deletes a Workers KV namespace and all its keys.
+  - id: cloudflare.pages-project.delete
+    hosts: [api.cloudflare.com]
+    methods: [DELETE]
+    path: /client/v4/accounts/{account}/pages/projects/{project}
+    resource: "{project}"
+    severity: high
+    message: Deletes a Cloudflare Pages project and its deployments.

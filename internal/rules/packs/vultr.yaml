@@ -1,0 +1,10 @@
+provider: vultr
+docs: https://www.vultr.com/api/
+rules:
+  - id: vultr.instance.delete
+    hosts: [api.vultr.com]
+    methods: [DELETE]
+    path: /v2/instances/{instance}
+    resource: "{instance}"
+    severity: critical
+    message: Deletes a Vultr instance.
