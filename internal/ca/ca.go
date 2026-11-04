@@ -173,8 +173,28 @@ func (a *Authority) covers(domains []string) error {
 	}
 	for _, d := range domains {
 		if !domainPermitted(d, a.cert.PermittedDNSDomains) {
-			return fmt.Errorf("the twokey CA is not allowed to issue certificates for %q (rules changed); "+
-				"run `twokey ca reset`, then `twokey ca trust` again if you trusted it", d)
+			return fmt.Errorf("%w: cannot issue certificates for %q", ErrConstraintsOutdated, d)
+		}
+	}
+	return nil
+}
+
+// ErrConstraintsOutdated means the CA's name constraints predate the rule
+// packs (e.g. after an upgrade added providers); see Rotate.
+var ErrConstraintsOutdated = errors.New("the twokey CA does not cover all rule domains")
+
+// Rotate moves the current CA aside (ca.old.pem / ca-key.old.pem) and drops
+// files derived from it, so the next LoadOrCreate creates a fresh CA.
+func Rotate(dir string) error {
+	for _, f := range []string{certFile, keyFile} {
+		old := filepath.Join(dir, strings.TrimSuffix(f, ".pem")+".old.pem")
+		if err := os.Rename(filepath.Join(dir, f), old); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	for _, f := range []string{bundleFile, javaTrustStoreFile} {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
 	}
 	return nil
