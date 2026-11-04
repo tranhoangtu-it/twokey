@@ -18,7 +18,6 @@ import (
 	"github.com/tranhoangtu-it/twokey/internal/audit"
 	"github.com/tranhoangtu-it/twokey/internal/ca"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
-	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
 
 // setupExitCode distinguishes twokey's own failures in `run` from the
@@ -30,6 +29,32 @@ const phoneTopicFile = "ntfy-topic"
 // shutdownGrace gives denied holds time to be written before exit.
 const shutdownGrace = 500 * time.Millisecond
 
+// shutdownDrain bounds how long shutdown waits for denied holds to return
+// from the broker (and be audited) before the audit log is closed.
+const shutdownDrain = 3 * time.Second
+
+// maxHoldTimeout caps --timeout: every pending hold pins a connection and a
+// goroutine, and an hour is longer than anyone keeps an agent waiting.
+const maxHoldTimeout = time.Hour
+
+// validateTimeout checks a --timeout flag value.
+func validateTimeout(d time.Duration) error {
+	if d <= 0 || d > maxHoldTimeout {
+		return fmt.Errorf("--timeout must be more than 0 and at most %s (got %s)", maxHoldTimeout, d)
+	}
+	return nil
+}
+
+// denyAndDrain denies every pending hold at shutdown and waits until the
+// handlers have returned from the broker, so their by=shutdown rows reach
+// the audit log before it is closed, and the 403s reach the agents.
+func denyAndDrain(broker *approval.Broker) {
+	if broker.DenyAll("twokey is shutting down") > 0 {
+		broker.Drain(shutdownDrain)
+		time.Sleep(shutdownGrace)
+	}
+}
+
 // proxyConfig is what `up` and `run --phone` need to serve.
 type proxyConfig struct {
 	addr       string
@@ -40,7 +65,7 @@ type proxyConfig struct {
 	ntfyServer string
 	terminal   bool      // approvals typed into this process's stdin
 	logTo      io.Writer // where proxy diagnostics go
-	allowFile  string    // pre-approved operations (default: ./.twokey-allow.yaml if present)
+	allowFile  string    // pre-approved operations (default: a trusted ./.twokey-allow.yaml)
 	observe    bool      // log and audit would-be holds but forward everything
 	noDesktop  bool      // no native desktop notification on holds
 }
@@ -62,6 +87,9 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	if err := requireLoopback(c.addr); err != nil {
 		return nil, err
 	}
+	if err := validateTimeout(c.timeout); err != nil {
+		return nil, err
+	}
 	engine, err := loadEngine(c.rulesDir)
 	if err != nil {
 		return nil, err
@@ -71,16 +99,12 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 		return nil, err
 	}
 	logger := log.New(c.logTo, "twokey: ", log.LstdFlags)
-	allowPath := c.allowFile
-	if allowPath == "" {
-		allowPath = defaultAllowFile
-	}
-	allows, err := rules.LoadAllow(allowPath)
+	allow, err := loadProjectAllow(authority.Dir(), c.allowFile)
 	if err != nil {
-		return nil, fmt.Errorf("allow rules %s: %w", allowPath, err)
+		return nil, err
 	}
-	if c.allowFile != "" && allows == nil {
-		return nil, fmt.Errorf("allow rules %s: file not found or empty", allowPath)
+	if allow.warning != "" {
+		logger.Print(allow.warning)
 	}
 	if _, err := authority.EnsureBundle(ctx); err != nil {
 		logger.Printf("warning: could not build CA bundle (%v); Python/curl may reject intercepted hosts", err)
@@ -105,7 +129,7 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	srv := &http.Server{
 		Handler: proxy.New(proxy.Options{
 			Engine: engine, CA: authority, Broker: broker, Audit: auditLog, Version: version, Logf: logger.Printf,
-			Allow: allows,
+			Allow: allow.allows,
 		}),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          logger,
@@ -121,10 +145,8 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	}()
 	go func() {
 		<-ctx.Done()
-		if broker.DenyAll("twokey is shutting down") > 0 {
-			time.Sleep(shutdownGrace) // let the 403s reach the agents
-		}
-		_ = srv.Close()
+		denyAndDrain(broker)
+		_ = srv.Close() // Serve returns and the audit log is closed after this
 	}()
 
 	providers := map[string]bool{}
@@ -141,8 +163,11 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	for _, ch := range channels {
 		fmt.Fprintf(&b, "  %-8s %s\n", label, ch)
 	}
-	if len(allows) > 0 {
-		fmt.Fprintf(&b, "  allow    %d pre-approved operation(s) from %s\n", len(allows), allowPath)
+	if len(allow.allows) > 0 {
+		fmt.Fprintf(&b, "  allow    %d pre-approved operation(s) from %s\n", len(allow.allows), approval.Clean(allow.path))
+	}
+	if allow.warning != "" {
+		fmt.Fprintf(&b, "  allow    %s\n", approval.Clean(allow.warning))
 	}
 	if !c.observe {
 		fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n", c.timeout)
@@ -180,14 +205,19 @@ func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log
 		}
 	}
 	if topic != "" {
-		if len(topic) < 16 {
-			logger.Printf("warning: short ntfy topics are guessable; use `twokey phone`")
+		// Refuse before anything is sent: over http, or with a guessable
+		// topic, anyone could read the approval nonces and approve.
+		if err := approval.ValidateNtfy(c.ntfyServer, topic); err != nil {
+			return nil, nil, err
 		}
 		n := approval.NewNtfy(c.ntfyServer, topic, broker)
 		n.SetLogf(logger.Printf)
 		broker.AddNotifier(n)
 		go n.Listen(ctx)
-		channels = append(channels, fmt.Sprintf("phone — ntfy app subscribed to %s/%s", strings.TrimRight(c.ntfyServer, "/"), topic))
+		// The banner may land in the agent's console (run --phone): show
+		// only the end of the topic; `twokey phone` prints the whole one.
+		channels = append(channels, fmt.Sprintf("phone — ntfy topic %s on %s (see `twokey phone`)",
+			approval.RedactTopic(topic), strings.TrimRight(c.ntfyServer, "/")))
 	}
 	if len(channels) == 0 {
 		return nil, nil, errors.New("no approval channel: use the terminal or a phone (--phone, see `twokey phone`)")
@@ -201,42 +231,83 @@ func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log
 
 // phoneTopic returns the persisted ntfy topic, creating it on first use.
 // It lives in a 0600 file instead of argv or the environment, where the
-// agent could read it and approve its own requests.
+// agent could read it and approve its own requests. The file is written
+// atomically (temp file, then link or rename), so a crash never leaves a
+// half-written topic; an empty file (from older versions) is regenerated.
 func phoneTopic(dir string, rotate bool) (string, error) {
 	path := filepath.Join(dir, phoneTopicFile)
-	if !rotate {
-		if data, err := os.ReadFile(path); err == nil {
-			if t := strings.TrimSpace(string(data)); t != "" {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	const attempts = 3
+	for i := 0; i < attempts; i++ {
+		replace := rotate
+		if !rotate {
+			data, err := os.ReadFile(path)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+			case err != nil:
+				return "", err
+			case strings.TrimSpace(string(data)) == "":
+				replace = true // empty: nothing anyone subscribed to
+			default:
+				t := strings.TrimSpace(string(data))
+				if err := approval.ValidateNtfy("https://ntfy.sh", t); err != nil {
+					return "", fmt.Errorf("%s is corrupt (%v); run `twokey phone --rotate` and re-subscribe on your phone", path, err)
+				}
 				// Topics from older versions kept the folder's ACL on Windows.
 				_ = ca.RestrictToUser(path)
 				return t, nil
 			}
 		}
+		topic := "twokey-" + randomHex(12)
+		won, err := placeTopic(dir, path, topic, replace)
+		if err != nil {
+			return "", err
+		}
+		if won {
+			return topic, nil
+		}
+		// Another process created it first: read theirs.
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	topic := "twokey-" + randomHex(12)
-	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
-	if !rotate {
-		flags = os.O_CREATE | os.O_WRONLY | os.O_EXCL // first-run race: one winner
-	}
-	f, err := os.OpenFile(path, flags, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return phoneTopic(dir, false) // another process just created it
-	}
+	return "", fmt.Errorf("could not create %s; run `twokey phone --rotate`", path)
+}
+
+// placeTopic writes topic to a private temp file, then moves it into place:
+// replacing path when replace is set, else only if path does not exist yet
+// (a hard link fails if it does, so concurrent first runs agree on one).
+func placeTopic(dir, path, topic string, replace bool) (bool, error) {
+	tmp, err := os.CreateTemp(dir, phoneTopicFile+".*.tmp") // created 0600
 	if err != nil {
-		return "", err
+		return false, err
 	}
-	defer f.Close()
-	if _, err := f.WriteString(topic + "\n"); err != nil {
-		return "", err
+	name := tmp.Name()
+	defer os.Remove(name)
+	_, werr := tmp.WriteString(topic + "\n")
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return false, werr
 	}
 	// Anyone who can read the topic can approve; Windows ignores 0600.
-	if err := ca.RestrictToUser(path); err != nil {
-		return "", fmt.Errorf("restrict %s: %w", path, err)
+	if err := ca.RestrictToUser(name); err != nil {
+		return false, fmt.Errorf("restrict %s: %w", name, err)
 	}
-	return topic, nil
+	if !replace {
+		err := os.Link(name, path)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, os.ErrExist) {
+			return false, nil
+		}
+		// Filesystems without hard links: fall through to a rename.
+	}
+	if err := os.Rename(name, path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func cmdPhone(args []string) error {
@@ -251,6 +322,10 @@ func cmdPhone(args []string) error {
 		return err
 	}
 	topic, err := phoneTopic(home, *rotate)
+	if err != nil {
+		return err
+	}
+	err = approval.ValidateNtfy(*server, topic)
 	if err != nil {
 		return err
 	}

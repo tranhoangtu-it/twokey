@@ -5,6 +5,7 @@ package approval
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
@@ -28,6 +30,20 @@ type Request struct {
 	// Nonce is embedded in out-of-band approval links so stale or forged
 	// replies for a recycled ID cannot resolve a newer request.
 	Nonce string
+	// Fingerprint identifies the exact payload (see BodyFingerprint). Timed
+	// approvals are bound to it, so a grant approved for one body does not
+	// cover the same call with different parameters.
+	Fingerprint string
+}
+
+// BodyFingerprint digests what a URL without its query does not show: the
+// raw query and the body. Grants match it exactly.
+func BodyFingerprint(body []byte, rawQuery string) string {
+	h := sha256.New()
+	h.Write([]byte(rawQuery))
+	h.Write([]byte{0})
+	h.Write(body)
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // ConfirmText is what a human must type in the terminal to approve: every
@@ -57,10 +73,11 @@ func (r Request) ConfirmText() string {
 }
 
 // Clean replaces control characters (including ESC, so ANSI sequences are
-// defused) in request-derived strings before they are shown to a human.
+// defused) and invisible format characters in request-derived strings
+// before they are shown to a human.
 func Clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || isLayoutControl(r) {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || isLayoutControl(r) || isInvisible(r) {
 			return '?'
 		}
 		return r
@@ -82,6 +99,15 @@ func isLayoutControl(r rune) bool {
 		return true
 	}
 	return false
+}
+
+// isInvisible reports characters that render as nothing: zero-width
+// spaces and joiners, word joiner and invisible operators, BOM, soft hyphen
+// (all Unicode format characters) and the whole tag block, including its
+// unassigned code points. They make two names look identical, or put
+// characters into a confirmation that nobody can type.
+func isInvisible(r rune) bool {
+	return (r >= 0xe0000 && r <= 0xe007f) || unicode.Is(unicode.Cf, r)
 }
 
 // NormalizeSpace collapses runs of whitespace to single spaces.
@@ -118,6 +144,11 @@ type Notifier interface {
 	Closed(Request, Decision)
 }
 
+// MaxPending caps holds waiting for a human. Each costs a goroutine, a
+// prompt and a phone notification, and the agent controls how many it
+// starts; beyond the cap new holds are denied at once.
+const MaxPending = 100
+
 type entry struct {
 	req Request
 	ch  chan Decision
@@ -132,6 +163,10 @@ type Broker struct {
 	notifiers []Notifier
 	observe   atomic.Bool
 	grants    *Grants
+	// maxPending caps pending holds (MaxPending unless changed for tests).
+	maxPending int
+	// inflight counts Decide calls that have not returned (see Drain).
+	inflight atomic.Int64
 }
 
 // GrantObserver is told when a timed approval decided a request.
@@ -152,7 +187,31 @@ func (b *Broker) Observing() bool { return b.observe.Load() }
 
 // NewBroker returns a broker that denies requests nobody answers in timeout.
 func NewBroker(timeout time.Duration) *Broker {
-	return &Broker{timeout: timeout, pending: map[string]*entry{}, grants: NewGrants()}
+	return &Broker{timeout: timeout, pending: map[string]*entry{}, grants: NewGrants(), maxPending: MaxPending}
+}
+
+// SetMaxPending changes the pending-hold cap. Call before serving traffic.
+func (b *Broker) SetMaxPending(n int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.maxPending = n
+}
+
+// drainPoll is how often Drain checks for in-flight decisions.
+const drainPoll = 5 * time.Millisecond
+
+// Drain waits until no Decide call is in progress, or until timeout. It
+// reports whether everything returned. Shutdown calls it after DenyAll so
+// the callers can audit their denials before the audit log is closed.
+func (b *Broker) Drain(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for b.inflight.Load() > 0 {
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(drainPoll)
+	}
+	return true
 }
 
 // AddNotifier registers an approval channel. Call before serving traffic.
@@ -165,6 +224,8 @@ func (b *Broker) AddNotifier(n Notifier) {
 // Decide blocks until the request is approved, denied, times out, or ctx ends.
 // It returns the request as registered (with ID and timestamps) and the outcome.
 func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
+	b.inflight.Add(1)
+	defer b.inflight.Add(-1)
 	req.ID = strconv.FormatUint(b.seq.Add(1), 10)
 	req.Nonce = randomNonce()
 	req.Created = time.Now()
@@ -177,6 +238,12 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	e := &entry{req: req, ch: make(chan Decision, 1)}
 
 	b.mu.Lock()
+	if len(b.pending) >= b.maxPending {
+		n := len(b.pending)
+		b.mu.Unlock()
+		return req, Decision{By: "overload", Reason: fmt.Sprintf(
+			"denied without asking: %d requests are already waiting for a human decision (the limit)", n)}
+	}
 	b.pending[req.ID] = e
 	notifiers := append([]Notifier(nil), b.notifiers...)
 	b.mu.Unlock()

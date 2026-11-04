@@ -23,7 +23,9 @@ type Grant struct {
 	RuleID    string
 	Resource  string
 	Statement string // the match message: the SQL text for database guards
-	Expires   time.Time
+	// Fingerprint is the request's body+query digest (Request.Fingerprint).
+	Fingerprint string
+	Expires     time.Time
 }
 
 // Grants holds timed approvals in memory only: they die with the process.
@@ -67,7 +69,7 @@ func (g *Grants) AddFor(r Request, d time.Duration) ([]Grant, error) {
 	for _, m := range r.Matches {
 		g.next++
 		gr := Grant{ID: g.next, Method: r.Method, URL: r.URL, RuleID: m.RuleID, Resource: m.Resource,
-			Statement: m.Message, Expires: exp}
+			Statement: m.Message, Fingerprint: r.Fingerprint, Expires: exp}
 		g.list = append(g.list, gr)
 		added = append(added, gr)
 	}
@@ -105,7 +107,7 @@ func (g *Grants) Covers(r Request) bool {
 func (g *Grants) findLocked(r Request, rule, resource, statement string) (Grant, bool) {
 	for _, gr := range g.list {
 		if gr.Method == r.Method && gr.URL == r.URL && gr.RuleID == rule &&
-			gr.Resource == resource && gr.Statement == statement {
+			gr.Resource == resource && gr.Statement == statement && gr.Fingerprint == r.Fingerprint {
 			return gr, true
 		}
 	}

@@ -79,7 +79,11 @@ twokey doctor                 # check that curl / python / node / go are covered
 When the agent tries something destructive, the request **waits**. In the `twokey up` window you
 approve by typing the resource name (`approve 1 pg-data-prod`); on your phone you get an
 [ntfy](https://ntfy.sh) push with **Approve / Deny** buttons. Nobody answers within 2 minutes →
-denied. If the agent gives up while waiting, the request is dropped — approving later does nothing.
+denied (`--timeout`, from 1s up to 1h). If the agent gives up while waiting, the request is dropped —
+approving later does nothing. At most 100 requests wait at once; beyond that new ones are denied
+immediately (`decided_by: overload`). The ntfy server must use `https://` (plain `http://` only for
+`localhost`), and the topic must be at least 16 characters; twokey refuses to start otherwise and
+never prints the full topic outside `twokey phone` / `twokey setup`.
 A denied request returns `403` with a JSON body written for the model:
 
 > twokey blocked a destructive request (denied by a human): railway volumeDelete on pg-data-prod.
@@ -92,9 +96,11 @@ turn it off) — it only tells you something is waiting; approving still needs t
 *the identical operation* — same rule, same resource, same host or database and, for SQL, the same
 statement — for up to an hour (`grants` lists them, `revoke <id>` removes one; they vanish when
 twokey exits). Unknown resources and requests twokey could not read can never be pre-approved.
+If the resource name itself ends in `--for <duration>`, typing it exactly approves once.
 
-Every hold is appended to `~/.twokey/audit.jsonl`; read it with `twokey log`
-(`--denied`, `--provider railway`, `--since 24h`, `--json`).
+Every hold is appended to `~/.twokey/audit.jsonl` (mode 0600; rotated at 20 MiB to
+`audit.jsonl.1` … `.3`; very long URLs or SQL are truncated in the log); read it with `twokey log`
+(`--denied`, `--provider railway`, `--since 24h`, `--json`), which also reads the rotated files.
 
 ## What's covered
 
@@ -147,6 +153,19 @@ allow:
 
 Every entry needs an explicit `resource` (`"*"` to allow all); uninspectable requests are never
 pre-approved.
+
+The project directory is where the agent works, so the agent (or a repo you cloned) can write this
+file. twokey therefore ignores `./.twokey-allow.yaml` until you have reviewed it and run:
+
+```sh
+twokey allow trust            # trust ./.twokey-allow.yaml as it is now (prints its entries)
+twokey allow revoke           # stop using it
+```
+
+Trust is recorded by absolute path and SHA-256 in `~/.twokey/allow-trusted.json`; if the file changes,
+twokey ignores it again and its banner says so (`allow IGNORED … run twokey allow trust`). Passing
+`--allow FILE` explicitly counts as trust for that run. Under `--strict` the file is mounted
+read-only into the container.
 
 ## Guard a database (Postgres, MySQL)
 
@@ -219,7 +238,8 @@ The agent runs in a Docker container on an `--internal` network with no route to
 Its only way out is a tiny gateway container that forwards to twokey on your machine — so unsetting
 `HTTPS_PROXY`, raw sockets or a stray SDK simply have nowhere to go. The project directory is
 mounted at `/work`; only the CA certificate and trust bundles are mounted, never the CA key or the
-phone topic. Requires Docker (Docker Desktop on Windows/macOS).
+phone topic. Each run gets its own gateway (`alpine/socat`, pinned by digest), removed when the
+agent exits. Requires Docker (Docker Desktop on Windows/macOS).
 
 ## Threat model — read this
 

@@ -54,6 +54,7 @@ Usage:
   twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
   twokey run --observe -- <agent> [args...]            trial: log what would be held, hold nothing
   twokey phone [--rotate]                              set up approvals on your phone (ntfy)
+  twokey allow trust|revoke [FILE]                     use (or stop using) ./.twokey-allow.yaml after review
   twokey pg --upstream HOST:5432 [--upstream-tls]      guard a Postgres database (DROP, TRUNCATE, …)
   twokey mysql --upstream HOST:3306                    guard a MySQL database
   twokey log [-n 20] [--denied] [--provider P] [--since 24h] [--json]  what was held and decided
@@ -132,6 +133,8 @@ func dispatch(args []string) error {
 		return cmdPG(rest)
 	case "phone":
 		return cmdPhone(rest)
+	case "allow":
+		return cmdAllow(rest)
 	case "version", "--version", "-v":
 		fmt.Println("twokey", version)
 		return nil

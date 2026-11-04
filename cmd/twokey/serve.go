@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,10 +35,13 @@ func cmdUp(args []string) error {
 	phone := fs.Bool("phone", false, "also approve from your phone (see `twokey phone`)")
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic (default: the one from `twokey phone`)")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
-	allow := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
+	allow := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" once trusted with `twokey allow trust`)")
 	observe := fs.Bool("observe", false, "try twokey safely: log and audit what would be held, but hold nothing")
 	noDesktop := fs.Bool("no-desktop", false, "no native desktop notification when a request is held")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateTimeout(*timeout); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -57,9 +61,12 @@ func cmdUp(args []string) error {
 
 // requireLoopback refuses to become an open proxy on the network.
 func requireLoopback(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("bad --addr %q: %w", addr, err)
+	}
+	if err := validatePort(port, true); err != nil {
+		return fmt.Errorf("bad address %q: %w", addr, err)
 	}
 	if host == "localhost" {
 		return nil
@@ -68,6 +75,16 @@ func requireLoopback(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("refusing to listen on non-loopback address %q", addr)
+}
+
+// validatePort checks a numeric TCP port; 0 (pick a free port) only when
+// allowZero.
+func validatePort(port string, allowZero bool) error {
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 0 || n > 65535 || (n == 0 && !allowZero) {
+		return fmt.Errorf("port %q must be a number from 1 to 65535", port)
+	}
+	return nil
 }
 
 // ---- run / env -------------------------------------------------------------------
@@ -112,7 +129,8 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 // curlHome writes a curl config for the agent on Windows. Schannel curl
 // fails with CRYPT_E_NO_REVOCATION_CHECK on certificates from a local CA
 // (they have no CRL/OCSP endpoint); ssl-revoke-best-effort skips the check
-// only when it cannot be performed. The user's own curlrc is preserved.
+// only when it cannot be performed. The user's own curlrc is preserved,
+// except options that would route around twokey or skip TLS checks.
 func curlHome(twokeyDir string) (string, error) {
 	dir := filepath.Join(twokeyDir, "curl")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -125,7 +143,7 @@ func curlHome(twokeyDir string) (string, error) {
 			break
 		}
 	}
-	content := strings.TrimRight(string(user), "\r\n")
+	content := strings.TrimRight(withoutProxyOptions(string(user)), "\r\n")
 	if content != "" {
 		content += "\n"
 	}
@@ -134,6 +152,37 @@ func curlHome(twokeyDir string) (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+// withoutProxyOptions drops curlrc lines that set a proxy, a no-proxy list
+// or --insecure: they would let curl bypass twokey, as NO_PROXY would.
+func withoutProxyOptions(rc string) string {
+	var out []string
+	for _, line := range strings.Split(rc, "\n") {
+		if !isProxyOption(line) {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func isProxyOption(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" || strings.HasPrefix(t, "#") {
+		return false
+	}
+	short := strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "--")
+	name := strings.TrimLeft(t, "-")
+	if i := strings.IndexAny(name, " \t=:"); i >= 0 {
+		name = name[:i]
+	}
+	if short {
+		// -x (proxy), -U (proxy-user), -p (proxytunnel), -k (insecure)
+		return name == "x" || name == "U" || name == "p" || name == "k"
+	}
+	name = strings.ToLower(name)
+	return strings.HasPrefix(name, "proxy") || strings.HasPrefix(name, "socks") ||
+		name == "noproxy" || name == "preproxy" || name == "insecure"
 }
 
 // userCurlrcCandidates mirrors curl's Windows lookup order.
@@ -157,7 +206,7 @@ func cmdRun(args []string) error {
 	phone := fs.Bool("phone", false, "one-terminal mode: start the proxy in-process, approve on your phone")
 	timeout := fs.Duration("timeout", 2*time.Minute, "with --phone: deny holds nobody answers within this time")
 	rulesDir := fs.String("rules", "", "with --phone: extra rule pack directory")
-	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+")")
+	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+" once trusted)")
 	strict := fs.Bool("strict", false, "run the agent in a Docker container whose only network egress is twokey")
 	image := fs.String("image", "", "with --strict: container image that contains the agent")
 	observe := fs.Bool("observe", false, "one-terminal trial mode: in-process proxy that logs what would be held but holds nothing")
@@ -168,6 +217,9 @@ func cmdRun(args []string) error {
 	argv := fs.Args()
 	if len(argv) == 0 {
 		return errors.New("usage: twokey run [--addr A | --phone | --observe] -- <agent> [args...]")
+	}
+	if err := validateTimeout(*timeout); err != nil {
+		return setupFailure(err)
 	}
 
 	proxyAddr := *addr

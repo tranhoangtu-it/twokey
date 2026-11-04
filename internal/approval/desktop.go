@@ -96,6 +96,10 @@ func (d *Desktop) Notify(r Request) {
 // Closed is a no-op: the outcome is shown in the twokey window.
 func (*Desktop) Closed(Request, Decision) {}
 
+// markupEscaper escapes the characters freedesktop notification markup
+// interprets.
+var markupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 func truncate(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -120,7 +124,10 @@ func desktopCommand(goos string, r Request) (argv, env []string) {
 			"-e", "display notification (item 2 of argv) with title (item 1 of argv) sound name \"Ping\"",
 			"-e", "end run", title, body}, nil
 	case "linux", "freebsd", "openbsd", "netbsd":
-		return []string{"notify-send", "--app-name=twokey", "--urgency=critical", "--", title, body}, nil
+		// Notification daemons render Pango markup in the body (and some in
+		// the title): escape it so a path cannot become a link or styling.
+		return []string{"notify-send", "--app-name=twokey", "--urgency=critical", "--",
+			markupEscaper.Replace(title), markupEscaper.Replace(body)}, nil
 	default:
 		return nil, nil
 	}

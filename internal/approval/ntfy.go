@@ -5,13 +5,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Ntfy pushes held requests to a phone through an ntfy server (ntfy.sh or
@@ -26,6 +30,74 @@ type Ntfy struct {
 	broker *Broker
 	client *http.Client
 	logf   func(string, ...any)
+}
+
+// MinTopicLen is the shortest topic accepted: on a public server anyone who
+// guesses the topic can read the approval nonces and approve.
+const MinTopicLen = 16
+
+// maxTopicLen is ntfy's own topic length limit.
+const maxTopicLen = 64
+
+// ValidateNtfy checks the phone channel settings before any secret is sent:
+// the server must use https (plain http only to this machine), and the
+// topic must be long and use ntfy's topic characters. Errors never contain
+// the topic.
+func ValidateNtfy(server, topic string) error {
+	u, err := url.Parse(server)
+	if err != nil || u.Host == "" || u.Hostname() == "" {
+		return fmt.Errorf("ntfy server %q: want a URL like https://ntfy.sh", server)
+	}
+	if u.User != nil {
+		return errors.New("ntfy server URL must not contain credentials")
+	}
+	switch u.Scheme {
+	case "https":
+	case "http":
+		if !isLoopbackHost(u.Hostname()) {
+			return fmt.Errorf("ntfy server %q: use https — over plain http the topic and approval nonces travel in cleartext (http is allowed only for localhost)", server)
+		}
+	default:
+		return fmt.Errorf("ntfy server %q: want an https:// URL", server)
+	}
+	if len(topic) < MinTopicLen {
+		return fmt.Errorf("ntfy topic is too short (%d characters, need %d): anyone who guesses it can approve; use `twokey phone`", len(topic), MinTopicLen)
+	}
+	if len(topic) > maxTopicLen {
+		return fmt.Errorf("ntfy topic is too long (%d characters, max %d)", len(topic), maxTopicLen)
+	}
+	for _, r := range topic {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return errors.New("ntfy topic may contain only letters, digits, '-' and '_'")
+		}
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// RedactTopic shows only the end of a topic, enough to tell topics apart
+// in a banner or log without revealing the secret.
+func RedactTopic(topic string) string {
+	const keep = 4
+	if len(topic) <= keep {
+		return "…"
+	}
+	return "…" + topic[len(topic)-keep:]
+}
+
+// redact removes the topic from diagnostic text (url.Error embeds the URL).
+func (n *Ntfy) redact(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return strings.ReplaceAll(err.Error(), n.topic, RedactTopic(n.topic))
 }
 
 // NewNtfy builds the phone channel. server is e.g. "https://ntfy.sh".
@@ -65,13 +137,37 @@ type ntfyMessage struct {
 	Actions  []ntfyAction `json:"actions,omitempty"`
 }
 
+// maxNtfyMessage keeps a notification under ntfy's message size limit
+// (4096 bytes by default) so an agent-sized URL cannot make it fail.
+const maxNtfyMessage = 3000
+
+// holdMessage is the notification text for a held request, bounded in size.
+func holdMessage(r Request) string {
+	tail := "\nHold #" + r.ID
+	head := truncateBytes(fmt.Sprintf("%s\n%s %s", r.Summary(), Clean(r.Method), Clean(r.URL)), maxNtfyMessage-len(tail))
+	return head + tail
+}
+
+// truncateBytes cuts s to at most n bytes on a rune boundary.
+func truncateBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	const ellipsis = "…"
+	cut := n - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
+}
+
 // Notify publishes an urgent notification with Deny/Approve buttons.
 func (n *Ntfy) Notify(r Request) {
 	reply := n.server + "/" + n.replyTopic()
 	msg := ntfyMessage{
 		Topic:    n.topic,
 		Title:    "🛑 Agent wants to run a destructive action",
-		Message:  fmt.Sprintf("%s\n%s %s\nHold #%s", r.Summary(), Clean(r.Method), Clean(r.URL), r.ID),
+		Message:  holdMessage(r),
 		Priority: 5,
 		Tags:     []string{"rotating_light"},
 		Actions: []ntfyAction{
@@ -81,7 +177,7 @@ func (n *Ntfy) Notify(r Request) {
 	}
 	go func() { // network I/O must not delay the broker or other channels
 		if err := n.publish(msg); err != nil {
-			n.logf("ntfy: notify #%s failed: %v", r.ID, err)
+			n.logf("ntfy: notify #%s failed: %s", r.ID, n.redact(err))
 		}
 	}()
 }
@@ -96,13 +192,13 @@ func (n *Ntfy) Granted(r Request, d Decision) {
 	msg := ntfyMessage{
 		Topic:    n.topic,
 		Title:    "✓ Auto-approved by a timed approval",
-		Message:  fmt.Sprintf("%s\n%s %s\n%s", r.Summary(), Clean(r.Method), Clean(r.URL), d.Reason),
+		Message:  truncateBytes(fmt.Sprintf("%s\n%s %s\n%s", r.Summary(), Clean(r.Method), Clean(r.URL), d.Reason), maxNtfyMessage),
 		Priority: 3,
 		Tags:     []string{"hourglass"},
 	}
 	go func() {
 		if err := n.publish(msg); err != nil {
-			n.logf("ntfy: grant notice #%s failed: %v", r.ID, err)
+			n.logf("ntfy: grant notice #%s failed: %s", r.ID, n.redact(err))
 		}
 	}()
 }
@@ -159,7 +255,7 @@ func (n *Ntfy) Listen(ctx context.Context) {
 		if time.Since(started) > healthyAfter {
 			backoff = time.Second
 		}
-		n.logf("ntfy: subscription dropped (%v), retrying in %s", err, backoff)
+		n.logf("ntfy: subscription dropped (%s), retrying in %s", n.redact(err), backoff)
 		select {
 		case <-ctx.Done():
 			return
