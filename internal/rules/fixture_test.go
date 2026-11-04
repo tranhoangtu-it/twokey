@@ -109,6 +109,70 @@ func TestDuplicateQueryValuesMakeResourceUnknown(t *testing.T) {
 	}
 }
 
+const destroyPack = `provider: acme
+rules:
+  - id: acme.run.destroy
+    hosts: [api.acme.test]
+    methods: [POST]
+    path: /api/v2/runs
+    json: { field: data.attributes.is-destroy, equals: "true" }
+    resource: "{json.data.relationships.workspace.data.id}"
+    severity: critical
+`
+
+func destroyEngine(t *testing.T) *Engine {
+	t.Helper()
+	p, err := ParsePack([]byte(destroyPack))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := NewEngine([]Pack{p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func runReq(body string) Request {
+	return Request{Method: "POST", Host: "api.acme.test", Path: "/api/v2/runs", Body: []byte(body)}
+}
+
+// Some destructive calls differ from routine ones only by a body field
+// (Terraform Cloud: a run with "is-destroy": true).
+func TestJSONFieldMatcher(t *testing.T) {
+	e := destroyEngine(t)
+	if !e.NeedsBody("api.acme.test") {
+		t.Fatal("json rules need the request body buffered")
+	}
+	v := e.Evaluate(runReq(`{"data":{"attributes":{"is-destroy":true},"relationships":{"workspace":{"data":{"id":"ws-prod"}}}}}`))
+	if len(v.Matches) != 1 || v.Matches[0].Resource != "ws-prod" {
+		t.Fatalf("destroy run not held: %+v", v)
+	}
+	for _, safe := range []string{
+		`{"data":{"attributes":{"is-destroy":false}}}`,
+		`{"data":{"attributes":{"message":"plan"}}}`,
+		``,
+	} {
+		if v := e.Evaluate(runReq(safe)); v.Hold() {
+			t.Fatalf("held a normal run %q: %+v", safe, v)
+		}
+	}
+	if v := e.Evaluate(runReq(`{"data": not json`)); v.Uninspectable == "" {
+		t.Fatal("an unreadable body on a json rule must fail closed")
+	}
+}
+
+func TestJSONMatcherRequiresField(t *testing.T) {
+	bad := strings.Replace(destroyPack, "field: data.attributes.is-destroy, ", "", 1)
+	p, err := ParsePack([]byte(bad))
+	if err == nil {
+		_, err = NewEngine([]Pack{p})
+	}
+	if err == nil {
+		t.Fatal("json matcher without field accepted")
+	}
+}
+
 // LoadDir once built "./x.yaml", which fs.FS rejects: --rules DIR loaded nothing.
 func TestLoadDirReadsUserPacks(t *testing.T) {
 	dir := t.TempDir()
