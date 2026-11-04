@@ -120,6 +120,9 @@ func createLocked(dir string, permitted []string) (bool, error) {
 	if err := writeFileAtomic(filepath.Join(dir, keyFile), keyPEM, 0o600); err != nil {
 		return false, err
 	}
+	if err := restrictKeyACL(filepath.Join(dir, keyFile)); err != nil {
+		return false, fmt.Errorf("restrict CA key permissions: %w", err)
+	}
 	if err := writeFileAtomic(filepath.Join(dir, certFile), certPEM, 0o644); err != nil {
 		return false, err
 	}
@@ -183,11 +186,14 @@ func (a *Authority) covers(domains []string) error {
 // packs (e.g. after an upgrade added providers); see Rotate.
 var ErrConstraintsOutdated = errors.New("the twokey CA does not cover all rule domains")
 
-// Rotate moves the current CA aside (ca.old.pem / ca-key.old.pem) and drops
-// files derived from it, so the next LoadOrCreate creates a fresh CA.
+// Rotate moves the current CA aside (ca.old.<n>.pem / ca-key.old.<n>.pem)
+// and drops files derived from it, so the next LoadOrCreate creates a fresh
+// CA. Every rotated CA is kept so `twokey ca untrust` can remove it from the
+// OS trust store later.
 func Rotate(dir string) error {
+	stamp := fmt.Sprintf(".old.%d.pem", time.Now().UnixNano())
 	for _, f := range []string{certFile, keyFile} {
-		old := filepath.Join(dir, strings.TrimSuffix(f, ".pem")+".old.pem")
+		old := filepath.Join(dir, strings.TrimSuffix(f, ".pem")+stamp)
 		if err := os.Rename(filepath.Join(dir, f), old); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

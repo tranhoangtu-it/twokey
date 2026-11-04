@@ -59,7 +59,8 @@ Usage:
   twokey replay <scenario> [--live]                    replay a real-world incident
   twokey explain --method M --url U [-H k:v] [--data D] would this request be held?
   twokey rules [--rules DIR]                           list destructive-operation rules
-  twokey ca init|path|trust|reset                      manage the local CA
+  twokey ca init|path|trust|untrust|reset              manage the local CA
+  twokey uninstall [--purge]                           remove OS trust + Docker objects (and ~/.twokey)
   twokey version
 
 Typical use:
@@ -114,6 +115,8 @@ func dispatch(args []string) error {
 		return cmdRules(rest)
 	case "ca":
 		return cmdCA(rest)
+	case "uninstall":
+		return cmdUninstall(rest)
 	case "mysql":
 		return cmdMySQL(rest)
 	case "pg":
@@ -164,8 +167,14 @@ func loadAuthority(engine *rules.Engine) (*ca.Authority, bool, error) {
 			return nil, false, fmt.Errorf("%v (and rotating it failed: %w)", err, rerr)
 		}
 		fmt.Fprintln(os.Stderr, "twokey: rule packs now cover more domains, so a new local CA was created "+
-			"(old one kept as ca.old.pem). If you used `twokey ca trust`, run it again.")
+			"(the old one is kept so `twokey ca untrust` can remove it). If you used `twokey ca trust`, run it again.")
 		return ca.LoadOrCreate(home, engine.Domains()...)
+	}
+	if err == nil && !created {
+		// CAs made before v0.5 on Windows inherit the folder ACL; tighten it.
+		if herr := ca.HardenKey(home); herr != nil {
+			fmt.Fprintln(os.Stderr, "twokey: warning: could not restrict CA key permissions:", herr)
+		}
 	}
 	return a, created, err
 }
@@ -298,7 +307,10 @@ func explain(w io.Writer, engine *rules.Engine, method, rawURL string, h http.He
 
 func cmdCA(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twokey ca init|path|trust|reset")
+		return errors.New("usage: twokey ca init|path|trust|untrust|reset")
+	}
+	if args[0] == "untrust" {
+		return cmdCAUntrust()
 	}
 	if args[0] == "path" {
 		// Report only; never create a CA (key material) as a side effect.

@@ -80,8 +80,8 @@ func TestNameConstrainedCA(t *testing.T) {
 	if err != nil || !created || bytes.Equal(b.CertPEM(), a.CertPEM()) {
 		t.Fatalf("rotation should create a new covering CA: created=%v err=%v", created, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ca.old.pem")); err != nil {
-		t.Fatal("old CA must be kept as ca.old.pem")
+	if old, _ := filepath.Glob(filepath.Join(dir, "ca.old.*.pem")); len(old) != 1 {
+		t.Fatalf("old CA must be kept as ca.old.<n>.pem, got %v", old)
 	}
 	if _, _, err := LoadOrCreate(dir, "github.com"); err != nil {
 		t.Fatalf("subset of constraints must load: %v", err)
