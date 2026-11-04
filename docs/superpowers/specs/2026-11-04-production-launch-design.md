@@ -48,12 +48,10 @@ Today the README advertises brew and scoop, but neither works: the repo secret i
   No staging tap or rc promotion. *(builder's call)*
 - Windows install command stays `scoop bucket add twokey https://github.com/tranhoangtu-it/scoop-bucket`
   then `scoop install twokey`; getting into ScoopInstaller/Extras is not a 1.0 goal. *(builder's call)*
-- Package-manager uninstall must not leave a trusted CA behind: the brew cask gets an
-  `uninstall_preflight` and the scoop manifest a `pre_uninstall` that run `twokey ca untrust`
-  (user store only, no admin needed; failure is printed, never blocks the uninstall). `~/.twokey` is
-  kept unless the user runs `twokey uninstall --purge`, matching `brew`/`scoop` conventions. Verified
-  live on Windows; if a hook proves unreliable on an OS, drop it there and document
-  `twokey uninstall` as the required first step instead. *(builder's call)*
+- Package-manager uninstall: goreleaser's cask hooks moved to a new DSL (v2.19) that could not be
+  verified without a Mac, and scoops has no pre-uninstall hook, so no hook ships. The cask caveats
+  and the README runbook say to run `twokey uninstall` before `brew`/`scoop uninstall`.
+  *(builder's call, revised during implementation)*
 
 ### G2. Verifiable releases
 - GitHub artifact attestations (`actions/attest-build-provenance`) for every archive and

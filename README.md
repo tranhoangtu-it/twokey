@@ -50,12 +50,25 @@ twokey explain --method DELETE --url https://api.github.com/repos/acme/prod-api 
 ```sh
 brew install --cask tranhoangtu-it/tap/twokey                                  # macOS / Linux
 scoop bucket add twokey https://github.com/tranhoangtu-it/scoop-bucket && scoop install twokey   # Windows
-go install github.com/tranhoangtu-it/twokey/cmd/twokey@latest                  # Go ≥ 1.25
+go install github.com/tranhoangtu-it/twokey/cmd/twokey@latest                  # Go ≥ 1.26.10
 ```
 
 or download a binary from [Releases](https://github.com/tranhoangtu-it/twokey/releases)
 (Linux, macOS, Windows; amd64/arm64). The macOS binary is not notarized yet: if Gatekeeper blocks
 it, run `xattr -d com.apple.quarantine "$(which twokey)"`.
+
+### Verify a download
+
+Every release archive has a GitHub build-provenance attestation, `checksums.txt` is signed with
+Sigstore (keyless, by this repository's release workflow), and each archive ships an SPDX SBOM:
+
+```sh
+gh attestation verify twokey_<version>_linux_amd64.tar.gz --repo tranhoangtu-it/twokey
+cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/tranhoangtu-it/twokey/\.github/workflows/release\.yml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum --ignore-missing -c checksums.txt
+```
 
 ## Use it
 
@@ -196,6 +209,19 @@ Functions called from `SELECT` run code twokey cannot see.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    A["agent + its tools<br/>(twokey run)"] -- HTTPS_PROXY --> P{"host has rules?"}
+    P -- no --> T["blind tunnel<br/>(LLM API, npm, …)"]
+    P -- yes --> D["TLS via local CA<br/>decode REST · GraphQL · AWS"]
+    D -- "not destructive" --> F["upstream"]
+    D -- "destructive or unreadable" --> H["hold"]
+    H -- "approve (terminal / phone)" --> F
+    H -- "deny · timeout · agent gone" --> X["403 for the model"]
+```
+
+Details, package map and security properties: [docs/architecture.md](docs/architecture.md).
+
 `twokey run` sets `HTTPS_PROXY` plus CA-trust variables for each runtime
 (`NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
 `CURL_CA_BUNDLE`, `AWS_CA_BUNDLE`), replaces `NO_PROXY` with localhost only, removes
@@ -208,7 +234,12 @@ held — it fails closed.
 - The local CA is **name-constrained** to the rule packs' domains (`github.com`, `amazonaws.com`,
   `railway.com`, …): even a leaked `ca-key.pem` cannot impersonate other sites. After adding rules
   for new domains, run `twokey ca reset` (and `twokey ca trust` again if you used it).
-- WebSocket upgrades on watched hosts are checked against the rules, then passed through.
+- WebSocket upgrades on watched hosts are checked against the rules and spliced only after the
+  server answers `101`. On hosts whose rules look at request bodies (GraphQL, AWS, JSON) an
+  upgrade is held, because the frames that follow cannot be inspected.
+- Bypass resistance: dot segments and `//` in paths are resolved before matching, method-override
+  headers (`X-HTTP-Method-Override` and friends, `_method`) are evaluated too, every AWS `Action`
+  value is checked, and request heads over 1 MiB are rejected.
 
 ### Platform notes
 
@@ -231,6 +262,43 @@ held — it fails closed.
 
 `explain`: 0 = passes, 2 = would be held. `run`: the agent's exit status, or 125 if twokey itself
 failed (e.g. no proxy running).
+
+### Performance
+
+Deciding hold-or-pass costs about 30–40 µs per request on a watched host with all 126 rules loaded
+(Ryzen 7 7800X3D, `go test ./internal/rules -bench . -benchmem`); unwatched hosts are a plain TCP
+tunnel. The added latency is the local TLS hop, not the rules.
+
+## Configuration reference
+
+| Setting | Where | Default | Meaning |
+|---|---|---|---|
+| `--addr` | `up`, `run` | `127.0.0.1:7171` | Proxy address (loopback only) |
+| `--timeout` | `up`, `run --phone`, `pg`, `mysql` | `2m` | Deny holds nobody answers in time (max `1h`) |
+| `--phone` | `up`, `run`, `pg`, `mysql` | off | Also approve from your phone via ntfy |
+| `--observe` | `up`, `run` | off | Log what would be held, hold nothing |
+| `--strict` / `--image` | `run` | off | Run the agent in Docker with twokey as its only egress |
+| `--rules DIR` | `up`, `run --phone`, `rules`, `explain` | — | Extra rule packs (YAML) |
+| `--allow FILE` | `up`, `run --phone`, `pg`, `mysql` | trusted `./.twokey-allow.yaml` | Pre-approved operations |
+| `--no-desktop` | `up`, `run --phone` | off | No desktop notification on a hold |
+| `--ntfy-server` | `up`, `phone`, `pg`, `mysql` (`run --phone`: `TWOKEY_NTFY_SERVER`) | `https://ntfy.sh` | ntfy server (https; http only for localhost) |
+| `TWOKEY_HOME` | env | `~/.twokey` | CA, phone topic, trust list, audit log |
+| `TWOKEY_NTFY_SERVER`, `TWOKEY_NTFY_TOPIC` | env | — | Phone channel; never passed to the agent |
+
+Stability of all of the above across 1.x: [docs/compatibility.md](docs/compatibility.md).
+Which agents have been checked end to end: [docs/agents.md](docs/agents.md).
+
+## Operations runbook
+
+| Situation | Do this |
+|---|---|
+| An agent's call went through that should have been held | `twokey doctor` (is that runtime routed and trusting the CA?), then `twokey explain --method M --url U` — exit 0 means no rule covers it: open an issue or add a rule |
+| Upgraded and Go tools / Windows curl fail TLS | The CA rotated: `twokey setup --yes --trust`, then `twokey ca untrust --retired` |
+| A hold you did not expect | `twokey log -n 20` shows rule, resource and who decided; pre-approve safe ones in `.twokey-allow.yaml` + `twokey allow trust` |
+| Allow file changed and is now `IGNORED` | Review the diff, then `twokey allow trust` |
+| Lost the phone / topic leaked | `twokey phone --rotate`, scan the new QR |
+| Proxy port already in use | Another `twokey up` is running, or pass `--addr 127.0.0.1:<port>` to both `up` and `run` |
+| Remove twokey | `twokey uninstall --purge`, then remove the binary (`brew uninstall` / `scoop uninstall`) |
 
 ## Strict mode: no way around the guard
 
@@ -261,6 +329,12 @@ does it), then `twokey ca untrust --retired` to remove the old CAs from the OS s
 Uninstalling: `twokey uninstall` removes every twokey CA from the OS trust store (by exact
 thumbprint) and any strict-mode Docker objects; add `--purge` to delete `~/.twokey` too.
 `twokey ca untrust` does only the trust-store part.
+
+## Documentation
+
+[Architecture](docs/architecture.md) · [Agents](docs/agents.md) ·
+[Compatibility promise](docs/compatibility.md) · [Changelog](CHANGELOG.md) ·
+[Security policy](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## Roadmap
 
