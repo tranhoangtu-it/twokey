@@ -61,20 +61,22 @@ func ParseAllow(data []byte) ([]Allow, error) {
 }
 
 func globRegexp(glob string) *regexp.Regexp {
-	return regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(glob), `\*`, ".*") + "$")
+	// (?s): '*' also spans newlines, which request-derived text may contain.
+	return regexp.MustCompile("(?s)^" + strings.ReplaceAll(regexp.QuoteMeta(glob), `\*`, ".*") + "$")
 }
 
 // Allowed reports which allow entry (if any) covers m. A match with an
-// unknown resource is only covered by resource "*".
+// unknown resource is never covered, not even by resource "*": nobody can
+// have pre-approved a target that cannot be named.
 func Allowed(m Match, allows []Allow) (Allow, bool) {
+	if m.Resource == "" {
+		return Allow{}, false
+	}
 	for _, a := range allows {
 		if a.rule == nil { // constructed outside ParseAllow
 			a.rule, a.resource = globRegexp(a.Rule), globRegexp(a.Resource)
 		}
 		if !a.rule.MatchString(m.RuleID) {
-			continue
-		}
-		if m.Resource == "" && a.Resource != "*" {
 			continue
 		}
 		if a.resource.MatchString(m.Resource) {

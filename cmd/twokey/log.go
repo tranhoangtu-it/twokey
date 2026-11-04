@@ -40,22 +40,44 @@ func cmdLog(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if o.n < 0 {
+		return fmt.Errorf("-n must be 0 (everything) or more, got %d", o.n)
+	}
+	if o.since < 0 {
+		return fmt.Errorf("--since must be a positive duration such as 24h, got %s", o.since)
+	}
 	home, err := homeDir()
 	if err != nil {
 		return err
 	}
 	path := filepath.Join(home, "audit.jsonl")
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
+	files := audit.Files(path) // rotated files first: oldest entries first
+	if len(files) == 0 {
 		fmt.Println("no audit log yet at", path, "— nothing has been held.")
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	o.now = time.Now()
-	return printLog(os.Stdout, f, o)
+	return printLogFiles(os.Stdout, files, o)
+}
+
+// printLogFiles prints entries from several files (oldest first) as one log.
+func printLogFiles(w io.Writer, paths []string, o logOptions) error {
+	p := newLogPrinter(w, o)
+	for _, path := range paths {
+		f, err := os.Open(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue // rotated away while we were reading
+		}
+		if err != nil {
+			return err
+		}
+		err = p.read(f)
+		f.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return p.finish()
 }
 
 type logLine struct {
@@ -63,55 +85,118 @@ type logLine struct {
 	entry audit.Entry
 }
 
+// printLog prints the entries of one audit stream.
 func printLog(w io.Writer, r io.Reader, o logOptions) error {
-	br := bufio.NewReader(r)
-	var kept []logLine
-	malformed := 0
+	p := newLogPrinter(w, o)
+	if err := p.read(r); err != nil {
+		return err
+	}
+	return p.finish()
+}
+
+// logPrinter streams entries: with -n it keeps only the last n matching
+// entries (a ring), so memory stays bounded however large the log is.
+type logPrinter struct {
+	w         io.Writer
+	o         logOptions
+	ring      []logLine
+	next      int
+	printed   int
+	malformed int
+	err       error // first error re-encoding an entry
+}
+
+func newLogPrinter(w io.Writer, o logOptions) *logPrinter { return &logPrinter{w: w, o: o} }
+
+// read consumes one file. Lines longer than maxAuditLine are skipped
+// without being held in memory.
+func (p *logPrinter) read(r io.Reader) error {
+	br := bufio.NewReaderSize(r, 64*1024)
+	var line []byte
+	tooLong := false
 	for {
-		line, err := br.ReadString('\n')
-		if raw := strings.TrimSpace(line); raw != "" {
-			var e audit.Entry
-			switch {
-			case len(raw) > maxAuditLine: // agent-sized URL: skip, don't flood the terminal
-				malformed++
-			case json.Unmarshal([]byte(raw), &e) != nil:
-				malformed++
-			case keepEntry(e, o):
-				kept = append(kept, logLine{raw, e})
+		chunk, err := br.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > maxAuditLine+1 {
+				tooLong, line = true, line[:0]
+			} else {
+				line = append(line, chunk...)
 			}
 		}
-		if errors.Is(err, io.EOF) {
-			break
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue // the line goes on
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
+		p.line(line, tooLong)
+		line, tooLong = line[:0], false
+		if err != nil { // io.EOF; an unterminated last line was handled above
+			return nil
+		}
 	}
-	if o.n > 0 && len(kept) > o.n {
-		kept = kept[len(kept)-o.n:]
+}
+
+func (p *logPrinter) line(b []byte, tooLong bool) {
+	raw := strings.TrimSpace(string(b))
+	if raw == "" && !tooLong {
+		return
 	}
-	for _, l := range kept {
-		if o.json {
-			// Re-encode: encoding/json escapes control characters, so a
-			// tampered log cannot send raw escape sequences to the terminal.
-			out, err := json.Marshal(l.entry)
-			if err != nil {
-				return err
+	var e audit.Entry
+	switch {
+	case tooLong: // agent-sized URL: skip, don't flood the terminal
+		p.malformed++
+	case json.Unmarshal([]byte(raw), &e) != nil:
+		p.malformed++
+	case keepEntry(e, p.o):
+		p.keep(logLine{raw, e})
+	}
+}
+
+func (p *logPrinter) keep(l logLine) {
+	if p.o.n <= 0 { // everything: print as we go
+		p.print(l)
+		return
+	}
+	if len(p.ring) < p.o.n {
+		p.ring = append(p.ring, l)
+		return
+	}
+	p.ring[p.next] = l
+	p.next = (p.next + 1) % p.o.n
+}
+
+func (p *logPrinter) print(l logLine) {
+	p.printed++
+	if p.o.json {
+		// Re-encode: encoding/json escapes control characters, so a
+		// tampered log cannot send raw escape sequences to the terminal.
+		out, err := json.Marshal(l.entry)
+		if err != nil {
+			if p.err == nil {
+				p.err = err
 			}
-			fmt.Fprintln(w, string(out))
-		} else {
-			fmt.Fprintln(w, formatEntry(l.entry))
+			return
+		}
+		fmt.Fprintln(p.w, string(out))
+		return
+	}
+	fmt.Fprintln(p.w, formatEntry(l.entry))
+}
+
+func (p *logPrinter) finish() error {
+	for i := range p.ring {
+		p.print(p.ring[(p.next+i)%len(p.ring)])
+	}
+	if !p.o.json {
+		if p.printed == 0 {
+			fmt.Fprintln(p.w, "no matching entries")
+		}
+		if p.malformed > 0 {
+			fmt.Fprintf(p.w, "(skipped %d malformed line(s))\n", p.malformed)
 		}
 	}
-	if !o.json {
-		if len(kept) == 0 {
-			fmt.Fprintln(w, "no matching entries")
-		}
-		if malformed > 0 {
-			fmt.Fprintf(w, "(skipped %d malformed line(s))\n", malformed)
-		}
-	}
-	return nil
+	return p.err
 }
 
 func keepEntry(e audit.Entry, o logOptions) bool {

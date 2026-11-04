@@ -1,13 +1,14 @@
 package rules
 
 import (
-	"net/url"
 	"strings"
 )
 
 // pathTemplate matches URL paths like "/repos/{owner}/{repo}".
 // "{name}" captures one segment; "{name...}" (last segment only) captures
-// the rest of the path including slashes.
+// the rest of the path including slashes. Paths are matched already
+// percent-decoded, so captured values are used as is (decoding them again
+// would show a resource that differs from what the server acts on).
 type pathTemplate struct {
 	segments []string
 }
@@ -27,7 +28,7 @@ func (t *pathTemplate) match(p string) (map[string]string, bool) {
 				if i >= len(parts) {
 					return nil, false
 				}
-				vars[greedy] = unescape(strings.Join(parts[i:], "/"))
+				vars[greedy] = strings.Join(parts[i:], "/")
 				return vars, true
 			}
 		}
@@ -35,7 +36,7 @@ func (t *pathTemplate) match(p string) (map[string]string, bool) {
 			return nil, false
 		}
 		if isVar {
-			vars[name] = unescape(parts[i])
+			vars[name] = parts[i]
 		} else if !strings.EqualFold(seg, parts[i]) {
 			return nil, false
 		}
@@ -52,11 +53,4 @@ func splitPath(p string) []string {
 		}
 	}
 	return out
-}
-
-func unescape(s string) string {
-	if u, err := url.PathUnescape(s); err == nil {
-		return u
-	}
-	return s
 }

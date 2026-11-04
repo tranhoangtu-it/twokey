@@ -67,7 +67,7 @@ func TestCurlHomeKeepsUserConfigAndAddsRevokeBestEffort(t *testing.T) {
 }
 
 func TestStrictRunArgs(t *testing.T) {
-	args := strings.Join(strictRunArgs("node:22", "/proj", "/h/.twokey", "7171", true, false,
+	args := strings.Join(strictRunArgs("node:22", "/proj", "/h/.twokey", "twokey-gw-7171", true, false,
 		[]string{"claude", "--yes"}), " ")
 	for _, want := range []string{
 		"--network " + strictNetwork, "-i", "/proj:/work", "-w /work",

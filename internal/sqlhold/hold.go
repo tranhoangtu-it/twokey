@@ -3,9 +3,12 @@
 package sqlhold
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tranhoangtu-it/twokey/internal/approval"
@@ -26,38 +29,68 @@ type Guard struct {
 	Logf     func(string, ...any)
 }
 
-// Check returns "" when the statement may run, else the message to send
-// back to the client as a database error. alive reports whether the client
-// is still connected (an approved statement for a gone client is dropped).
+// Check is CheckContext without a client watch.
 func (g *Guard) Check(findings []sqlclass.Finding, target string, alive func() bool) string {
+	return g.CheckContext(context.Background(), findings, target, alive)
+}
+
+// CheckContext returns "" when the statement may run, else the message to
+// send back to the client as a database error. A hold ends (denied) when
+// ctx ends, e.g. because the client disconnected; alive reports whether the
+// client is still connected once approved (an approved statement for a
+// gone client is dropped).
+//
+// The whole message runs or nothing does, so allow rules apply all or
+// nothing: unless every match is pre-approved, every match is held.
+// Uninspectable findings are never pre-approved.
+func (g *Guard) CheckContext(ctx context.Context, findings []sqlclass.Finding, target string, alive func() bool) string {
 	if len(findings) == 0 {
 		return ""
 	}
-	v := rules.Verdict{}
-	for _, f := range findings {
-		v.Matches = append(v.Matches, rules.Match{
-			RuleID: g.Provider + "." + RuleSlug(f.Kind), Provider: g.Provider, Severity: "critical",
-			Operation: f.Kind, Resource: f.Target, Message: f.Statement,
-		})
-	}
-	v, allowed := rules.ApplyAllow(v, g.Allow)
-	if len(allowed) > 0 {
+	v := verdict(g.Provider, findings)
+	if rest, allowed := rules.ApplyAllow(v, g.Allow); !rest.Hold() {
 		g.write(audit.Entry{Time: time.Now(), Method: "SQL", URL: target, Matches: allowed,
 			Approved: true, By: "allowlist", Reason: "pre-approved by allow rules"})
-	}
-	if !v.Hold() {
 		return ""
 	}
-	held, d := g.Broker.Decide(context.Background(), approval.Request{Method: "SQL", URL: target, Matches: v.Matches})
+	held, d := g.Broker.Decide(ctx, approval.Request{Method: "SQL", URL: target, Matches: v.Matches, Uninspectable: v.Uninspectable})
 	if d.Approved && alive != nil && !alive() {
 		d = approval.Decision{By: "client", Reason: "client disconnected before the decision"}
 	}
 	g.write(audit.Entry{Time: time.Now(), ID: held.ID, Method: held.Method, URL: held.URL,
-		Matches: held.Matches, Approved: d.Approved, By: d.By, Reason: d.Reason})
+		Matches: held.Matches, Uninspectable: held.Uninspectable, Approved: d.Approved, By: d.By, Reason: d.Reason})
 	if d.Approved {
 		return ""
 	}
 	return fmt.Sprintf("twokey blocked a destructive statement (%s): %s", d.Reason, held.Summary())
+}
+
+// verdict turns findings into rule matches; uninspectable findings also set
+// the verdict's Uninspectable reason, which allow rules and grants never
+// cover.
+func verdict(provider string, findings []sqlclass.Finding) rules.Verdict {
+	v := rules.Verdict{}
+	var reasons []string
+	for _, f := range findings {
+		v.Matches = append(v.Matches, rules.Match{
+			RuleID: provider + "." + RuleSlug(f.Kind), Provider: provider, Severity: "critical",
+			Operation: f.Kind, Resource: f.Target, Message: f.Statement,
+		})
+		if f.Kind == sqlclass.KindUninspectable {
+			reasons = appendUnique(reasons, f.Reason)
+		}
+	}
+	v.Uninspectable = strings.Join(reasons, "; ")
+	return v
+}
+
+func appendUnique(list []string, s string) []string {
+	for _, x := range list {
+		if x == s {
+			return list
+		}
+	}
+	return append(list, s)
 }
 
 func (g *Guard) write(e audit.Entry) {
@@ -70,4 +103,35 @@ func (g *Guard) write(e audit.Entry) {
 // "DROP TABLE" -> "drop-table", "ALTER TABLE … DROP" -> "alter-table-drop".
 func RuleSlug(kind string) string {
 	return strings.NewReplacer(" … ", "-", " ", "-").Replace(strings.ToLower(kind))
+}
+
+// WatchClient returns a context that ends when the client closes its side
+// of conn while a statement is held. It reads (peeks) from r in the
+// background, so the caller must not read from r until stop returns; stop
+// (safe to call more than once) also clears the read deadline. Bytes the
+// client sends meanwhile stay buffered in r. The context stays valid after
+// stop, so ctx.Err() still tells whether the client left.
+func WatchClient(conn net.Conn, r *bufio.Reader) (ctx context.Context, stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	stopping := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := r.Peek(1); err != nil {
+			select {
+			case <-stopping: // our own deadline below ended the peek
+			default:
+				cancel() // EOF or reset: the client is gone
+			}
+		}
+	}()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			close(stopping)
+			_ = conn.SetReadDeadline(time.Now())
+			<-done
+			_ = conn.SetReadDeadline(time.Time{})
+		})
+	}
 }

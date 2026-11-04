@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -70,7 +71,7 @@ type Pack struct {
 type Request struct {
 	Method string
 	Host   string // may include :port
-	Path   string // URL path without query
+	Path   string // percent-decoded URL path (url.URL.Path), without query
 	Query  string // raw query string
 	Header http.Header
 	Body   []byte
@@ -227,80 +228,6 @@ func (e *Engine) NeedsBody(host string) bool {
 	return false
 }
 
-// Evaluate returns every rule that fires for req.
-func (e *Engine) Evaluate(req Request) Verdict {
-	host := normalizeHost(req.Host)
-	method := strings.ToUpper(req.Method)
-	var v Verdict
-	var gql *graphqlCalls // parsed lazily, at most once
-	var gqlErr error
-	var aws *awsCall
-	var body map[string]string // flattened JSON body, parsed lazily
-	var bodyErr error
-
-	for _, r := range e.rules {
-		if !r.matchHost(host) {
-			continue
-		}
-		if len(r.Methods) > 0 && !contains(r.Methods, method) {
-			continue
-		}
-		if len(r.UnlessQuery) > 0 && hasAnyQueryKey(req.Query, r.UnlessQuery) {
-			continue
-		}
-		vars := queryVars(req.Query)
-		vars["host"] = host
-		if r.tpl != nil {
-			captured, ok := r.tpl.match(req.Path)
-			if !ok {
-				continue
-			}
-			vars = mergeVars(vars, captured)
-		}
-
-		switch {
-		case r.GraphQL != nil:
-			if gql == nil && gqlErr == nil {
-				gql, gqlErr = parseGraphQLBody(req)
-			}
-			if gqlErr != nil {
-				if !errors.Is(gqlErr, errNoPayload) && v.Uninspectable == "" {
-					v.Uninspectable = fmt.Sprintf("GraphQL request to %s could not be inspected: %v", host, gqlErr)
-				}
-				continue
-			}
-			for _, call := range gql.mutations {
-				if contains(r.GraphQL.Mutations, call.name) {
-					v.Matches = append(v.Matches, r.toMatch(call.name, mergeVars(vars, call.args)))
-				}
-			}
-		case r.AWS != nil:
-			if aws == nil {
-				aws = parseAWSCall(req)
-			}
-			if aws.action != "" && contains(r.AWS.Actions, aws.action) {
-				v.Matches = append(v.Matches, r.toMatch(aws.action, mergeVars(vars, aws.params)))
-			}
-		case r.JSON != nil:
-			if body == nil && bodyErr == nil {
-				body, bodyErr = flattenBody(req.Body)
-			}
-			if bodyErr != nil {
-				if v.Uninspectable == "" {
-					v.Uninspectable = fmt.Sprintf("JSON body to %s could not be inspected: %v", host, bodyErr)
-				}
-				continue
-			}
-			if body["json."+r.JSON.Field] == r.JSON.Equals {
-				v.Matches = append(v.Matches, r.toMatch(method+" "+r.Path, mergeVars(vars, body)))
-			}
-		default:
-			v.Matches = append(v.Matches, r.toMatch(method+" "+r.Path, vars))
-		}
-	}
-	return v
-}
-
 func (r *Rule) toMatch(op string, vars map[string]string) Match {
 	return Match{
 		RuleID:    r.ID,
@@ -335,7 +262,8 @@ func flattenBody(raw []byte) (map[string]string, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	if dec.More() {
+	// dec.More() misses a stray ']' or '}': only a clean EOF may follow.
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, errors.New("trailing data after the JSON value")
 	}
 	flattenJSON("json", v, out)

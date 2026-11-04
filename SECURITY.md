@@ -27,6 +27,11 @@ not in public issues. Expect a first response within a few days.
   `ca-key.pem` cannot be used to impersonate other sites.
 - The phone-approval topic is stored in `~/.twokey/ntfy-topic` (mode 0600), never on the
   command line, and `TWOKEY_NTFY_*` variables are stripped from the agent's environment.
+  Banners and logs show only its last four characters; the ntfy server must use https (http only
+  for localhost) and topics shorter than 16 characters are refused.
+- A project `.twokey-allow.yaml` (which the agent can write) is ignored until the human runs
+  `twokey allow trust`, which records its path and SHA-256 in `~/.twokey/allow-trusted.json`;
+  any later change makes twokey ignore it again.
 - `ca-key.pem` is mode 0600 on Unix; on Windows it gets a protected ACL with a single entry for
   your user (no SYSTEM/Administrators, inherited or explicit), and older keys are tightened on the
   next run. This keeps the key from *other* accounts; an agent running as you can still read it,

@@ -8,41 +8,65 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{.Version}}"]
+    mod_timestamp: "{{ .CommitTimestamp }}"   # reproducible builds
 
 archives:
   - formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
-    files: [README.md, LICENSE]
+    files: [README.md, LICENSE, CHANGELOG.md, SECURITY.md]
 
 checksum:
   name_template: checksums.txt
 
+# One SPDX SBOM per archive (syft is installed by the release workflow).
+sboms:
+  - artifacts: archive
+
+# Keyless Sigstore signature over checksums.txt; every archive is covered via
+# its checksum. Verify with the command in README "Verify a download".
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+
 # Package managers. They publish to tranhoangtu-it/homebrew-tap and
-# tranhoangtu-it/scoop-bucket with the TAP_GITHUB_TOKEN secret; without it
+# tranhoangtu-it/scoop-bucket with the HOMEBREW_TAP_TOKEN secret; without it
 # the upload is skipped and the GitHub release still succeeds.
 homebrew_casks:
   - name: twokey
     repository:
       owner: tranhoangtu-it
       name: homebrew-tap
-      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
     homepage: https://github.com/tranhoangtu-it/twokey
     description: Make your AI agent ask a human before it deletes prod
     license: MIT
-    skip_upload: '{{ if eq (envOrDefault "TAP_GITHUB_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+    caveats: |
+      The macOS binary is not notarized yet. If Gatekeeper blocks it, run:
+        xattr -d com.apple.quarantine "$(which twokey)"
+      Before `brew uninstall`, run `twokey uninstall` so the local CA is removed
+      from your OS trust store (add --purge to also delete ~/.twokey).
 
 scoops:
   - name: twokey
     repository:
       owner: tranhoangtu-it
       name: scoop-bucket
-      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
     homepage: https://github.com/tranhoangtu-it/twokey
     description: Make your AI agent ask a human before it deletes prod
     license: MIT
-    skip_upload: '{{ if eq (envOrDefault "TAP_GITHUB_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+
+release:
+  footer: |
+    **Verify:** `gh attestation verify <archive> --repo tranhoangtu-it/twokey` · full notes in [CHANGELOG.md](https://github.com/tranhoangtu-it/twokey/blob/main/CHANGELOG.md)
 
 changelog:
   sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:", "^ci:"]

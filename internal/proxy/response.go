@@ -62,19 +62,20 @@ func writeResponse(w io.Writer, req *http.Request, resp *http.Response) (mustClo
 type eofTracker struct {
 	io.ReadCloser
 	conn      net.Conn // optional: extended deadline per read (stalled uploads)
+	idle      time.Duration
 	eof       atomic.Bool
 	closeOnce sync.Once
 	closed    chan struct{}
 }
 
-func newEOFTracker(rc io.ReadCloser, conn net.Conn) *eofTracker {
-	return &eofTracker{ReadCloser: rc, conn: conn, closed: make(chan struct{})}
+func newEOFTracker(rc io.ReadCloser, conn net.Conn, idle time.Duration) *eofTracker {
+	return &eofTracker{ReadCloser: rc, conn: conn, idle: idle, closed: make(chan struct{})}
 }
 
 func (t *eofTracker) Read(p []byte) (int, error) {
 	if t.conn != nil {
 		// Activity-based: a long upload is fine, a silent one is dropped.
-		_ = t.conn.SetReadDeadline(time.Now().Add(bodyIdleTimeout))
+		_ = t.conn.SetReadDeadline(time.Now().Add(t.idle))
 	}
 	n, err := t.ReadCloser.Read(p)
 	if err == io.EOF {
@@ -140,12 +141,25 @@ func (c *bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 const agentInstructions = "Do not retry, rephrase, or work around this request (no other tool, endpoint, or credential). " +
 	"Tell the user exactly what you tried to do and why, and ask them to approve it in the twokey window or run it themselves."
 
-func blockedResponse(req *http.Request, held approval.Request, d approval.Decision) *http.Response {
-	outcome := "denied by a human"
-	if d.By == "timeout" {
-		outcome = "not approved in time"
+// blockedOutcome says why a held request was not approved, so the agent
+// (and its user) are not told a human denied what no human ever saw.
+func blockedOutcome(d approval.Decision) string {
+	switch d.By {
+	case "timeout":
+		return "not approved in time"
+	case "overload":
+		return "not queued for approval: too many requests are already waiting for a human"
+	case "shutdown":
+		return "twokey shut down before a human decided"
+	case "client":
+		return "the client disconnected before a human decided"
+	default:
+		return "denied by a human"
 	}
-	msg := fmt.Sprintf("twokey blocked a destructive request (%s): %s. %s", outcome, held.Summary(), agentInstructions)
+}
+
+func blockedResponse(req *http.Request, held approval.Request, d approval.Decision) *http.Response {
+	msg := fmt.Sprintf("twokey blocked a destructive request (%s): %s. %s", blockedOutcome(d), held.Summary(), agentInstructions)
 	body := map[string]any{
 		"error": map[string]any{
 			"type":          "twokey_blocked",

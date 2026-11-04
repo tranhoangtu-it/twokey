@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tranhoangtu-it/twokey/internal/approval"
 	"github.com/tranhoangtu-it/twokey/internal/audit"
 	"github.com/tranhoangtu-it/twokey/internal/myguard"
 	"github.com/tranhoangtu-it/twokey/internal/pgguard"
-	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
 
 // dbGuard describes one database flavour for `twokey pg` / `twokey mysql`.
@@ -35,7 +35,10 @@ func cmdPG(args []string) error    { return cmdDBGuard(postgresGuard, args) }
 func cmdMySQL(args []string) error { return cmdDBGuard(mysqlGuard, args) }
 
 // dbServer is what both guards provide.
-type dbServer interface{ Serve(net.Listener) error }
+type dbServer interface {
+	Serve(net.Listener) error
+	Close() error
+}
 
 // cmdDBGuard runs a database guard: point the agent's connection string at
 // the local port instead of the real database.
@@ -49,7 +52,7 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	phone := fs.Bool("phone", false, "also approve from your phone (see `twokey phone`)")
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
-	allowFile := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
+	allowFile := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" once trusted with `twokey allow trust`)")
 	observe := fs.Bool("observe", false, "log and audit statements that would be held, but hold nothing")
 	noDesktop := fs.Bool("no-desktop", false, "no native desktop notification when a statement is held")
 	if err := fs.Parse(args); err != nil {
@@ -58,13 +61,19 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	if *upstream == "" {
 		return fmt.Errorf("usage: twokey %s --upstream db.example.com:PORT [--listen %s]", g.cmd, g.defaultListen)
 	}
+	if err := validateTimeout(*timeout); err != nil {
+		return err
+	}
 	useTLS := *upstreamTLS || *skipVerify
 	if useTLS && !g.tls {
 		return errors.New("--upstream-tls is not supported for " + g.name)
 	}
-	upHost, _, err := net.SplitHostPort(*upstream)
+	upHost, upPort, err := net.SplitHostPort(*upstream)
 	if err != nil {
 		return fmt.Errorf("bad --upstream %q (want host:port): %w", *upstream, err)
+	}
+	if err := validatePort(upPort, false); err != nil {
+		return fmt.Errorf("bad --upstream %q: %w", *upstream, err)
 	}
 	var tlsConfig *tls.Config
 	if useTLS {
@@ -80,14 +89,11 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return err
 	}
-	allowPath := *allowFile
-	if allowPath == "" {
-		allowPath = defaultAllowFile
-	}
-	allows, err := rules.LoadAllow(allowPath)
+	allow, err := loadProjectAllow(home, *allowFile)
 	if err != nil {
-		return fmt.Errorf("allow rules %s: %w", allowPath, err)
+		return err
 	}
+	allows := allow.allows
 	auditPath := filepath.Join(home, "audit.jsonl")
 	auditLog, err := audit.Open(auditPath)
 	if err != nil {
@@ -123,9 +129,16 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	}
 
 	fmt.Printf("twokey %s — %s guard on %s → %s\n", version, g.name, ln.Addr(), *upstream)
-	fmt.Println("  holds    DROP …, TRUNCATE, DELETE/UPDATE without WHERE, ALTER TABLE … DROP")
+	fmt.Println("  holds    DROP …, TRUNCATE, DELETE/UPDATE without WHERE, ALTER TABLE … DROP, MERGE … DELETE")
+	fmt.Println("           (also inside WITH/EXPLAIN/COPY), and SQL it cannot inspect (DO, CALL, dynamic EXECUTE)")
 	for _, ch := range channels {
 		fmt.Printf("  approve  %s\n", ch)
+	}
+	if len(allows) > 0 {
+		fmt.Printf("  allow    %d pre-approved operation(s) from %s\n", len(allows), approval.Clean(allow.path))
+	}
+	if allow.warning != "" {
+		fmt.Printf("  allow    %s\n", approval.Clean(allow.warning))
 	}
 	fmt.Printf("  timeout  unanswered holds are denied after %s\n  audit    %s\n\n", *timeout, auditPath)
 	fmt.Printf("Point the agent at it, e.g.  "+g.example+"\n", ln.Addr())
@@ -137,8 +150,10 @@ func cmdDBGuard(g dbGuard, args []string) error {
 		return err
 	case <-ctx.Done():
 	}
-	if broker.DenyAll("twokey is shutting down") > 0 {
-		time.Sleep(shutdownGrace)
+	err = ln.Close()
+	denyAndDrain(broker) // before the deferred audit close
+	if cerr := srv.Close(); err == nil {
+		err = cerr // closes client and upstream connections still open
 	}
-	return ln.Close()
+	return err
 }

@@ -106,6 +106,12 @@ func newHarness(t *testing.T) *harness { return newHarnessWith(t, testPack) }
 
 func newHarnessWith(t *testing.T, packYAML string) *harness {
 	t.Helper()
+	return newHarnessOpts(t, packYAML, nil)
+}
+
+// newHarnessOpts lets a test adjust the proxy server before it starts.
+func newHarnessOpts(t *testing.T, packYAML string, adjust func(*Server)) *harness {
+	t.Helper()
 	h := &harness{}
 	h.upstream = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.upstreamHits.Add(1)
@@ -161,6 +167,9 @@ func newHarnessWith(t *testing.T, packYAML string) *harness {
 		Transport:   upstreamTransport, // trusts the upstream's test cert
 		UpstreamTLS: upstreamTransport.TLSClientConfig,
 	})
+	if adjust != nil {
+		adjust(srv)
+	}
 	front := httptest.NewServer(srv)
 	t.Cleanup(front.Close)
 	h.proxyURL, _ = url.Parse(front.URL)
@@ -263,7 +272,8 @@ func TestObserveModeForwardsWithoutHolding(t *testing.T) {
 func TestTimedGrantForwardsOnlyTheGrantedResource(t *testing.T) {
 	h := newHarness(t)
 	grant := approval.Request{Method: "DELETE", URL: "https://127.0.0.1/repos/acme/api",
-		Matches: []rules.Match{{RuleID: "test.repo.delete", Resource: "acme/api"}}}
+		Matches:     []rules.Match{{RuleID: "test.repo.delete", Resource: "acme/api"}},
+		Fingerprint: approval.BodyFingerprint(nil, "")}
 	if _, err := h.broker.Grants().AddFor(grant, time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +367,9 @@ func TestExpectContinueDoesNotStall(t *testing.T) {
 }
 
 func TestWebSocketUpgradeOnWatchedHost(t *testing.T) {
-	h := newHarness(t)
+	// Path-only rules: the handshake is inspectable, so it is spliced. (On
+	// hosts with body rules an upgrade is held, see TestUpgradeOnBodyRuleHostIsHeld.)
+	h := newHarnessWith(t, restOnlyPack)
 	tc, br := h.rawTLS(t)
 	fmt.Fprintf(tc, "GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", h.upstream.Listener.Addr())
 	resp, err := http.ReadResponse(br, nil)

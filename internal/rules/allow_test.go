@@ -24,8 +24,9 @@ allow:
 		{Match{RuleID: "vercel.project.delete", Resource: "prod"}, false},
 		{Match{RuleID: "github.repo.delete", Resource: "acme/sandbox-x"}, true}, // '*' spans '/'
 		{Match{RuleID: "github.repo.delete", Resource: "acme/api"}, false},
-		{Match{RuleID: "github.repo.delete", Resource: ""}, false}, // unknown resource needs "*"
-		{Match{RuleID: "fly.machine.delete", Resource: ""}, true},
+		{Match{RuleID: "github.repo.delete", Resource: ""}, false},
+		{Match{RuleID: "fly.machine.delete", Resource: ""}, false}, // unknown resources are never pre-approved
+		{Match{RuleID: "fly.machine.delete", Resource: "m1"}, true},
 		{Match{RuleID: "railway.volume.delete", Resource: "pr-1-preview"}, false},
 	}
 	for _, c := range cases {

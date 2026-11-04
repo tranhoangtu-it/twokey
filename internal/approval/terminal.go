@@ -112,6 +112,10 @@ func (t *Terminal) Run(in io.Reader) {
 		if !errors.Is(sc.Err(), bufio.ErrTooLong) {
 			if err := sc.Err(); err != nil {
 				t.printf("   approval input closed: %v (approve from your phone instead)\n", err)
+			} else {
+				// No stdin (service, IDE task): say so instead of advertising
+				// a prompt nobody can type into.
+				t.printf("   approval input closed (stdin ended): typed approvals are off; use your phone or holds time out\n")
 			}
 			return
 		}
@@ -152,13 +156,20 @@ func (t *Terminal) Handle(line string) string {
 		t.broker.Resolve(req.ID, Decision{Approved: false, By: "terminal", Reason: "denied by human"})
 		return ""
 	}
-	rest, grantFor, errMsg := splitFor(rest)
-	if errMsg != "" {
-		return errMsg
-	}
 	want := req.ConfirmText()
+	var grantFor time.Duration
+	// The resource name itself may end in "--for <dur>" (the agent picks
+	// names): an exact match is a one-time approval; only otherwise is a
+	// trailing pair read as a timed approval.
 	if NormalizeSpace(strings.Join(rest, " ")) != want {
-		return fmt.Sprintf("not approved: type the resource name exactly → approve %s %s", req.ID, want)
+		var errMsg string
+		rest, grantFor, errMsg = splitFor(rest)
+		if NormalizeSpace(strings.Join(rest, " ")) != want {
+			if errMsg != "" {
+				return errMsg
+			}
+			return fmt.Sprintf("not approved: type the resource name exactly → approve %s %s", req.ID, want)
+		}
 	}
 	reason := "approved with typed confirmation"
 	if grantFor > 0 {
@@ -181,13 +192,15 @@ func (t *Terminal) Handle(line string) string {
 }
 
 // splitFor removes a trailing "--for <duration>" from an approve command.
+// Only the final token pair is considered, and only a valid duration of at
+// most MaxGrant is a grant; otherwise args come back unchanged with a hint.
 func splitFor(args []string) ([]string, time.Duration, string) {
 	if len(args) < 2 || args[len(args)-2] != "--for" {
 		return args, 0, ""
 	}
 	d, err := time.ParseDuration(args[len(args)-1])
 	if err != nil || d <= 0 || d > MaxGrant {
-		return nil, 0, fmt.Sprintf("--for takes a duration of at most %s, e.g. --for 15m", MaxGrant)
+		return args, 0, fmt.Sprintf("--for takes a duration of at most %s, e.g. --for 15m", MaxGrant)
 	}
 	return args[:len(args)-2], d, ""
 }

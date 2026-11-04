@@ -45,8 +45,8 @@ func TestObserveModeApprovesImmediatelyAndNeverPrompts(t *testing.T) {
 }
 
 func TestCleanDefusesTerminalAndBidiControls(t *testing.T) {
-	for _, s := range []string{"\x1b[2J", "a\rb", "x‮y", "x y", "x⁦y"} {
-		if c := Clean(s); c == s || strings.ContainsAny(c, "\x1b\r‮ ⁦") {
+	for _, s := range []string{"\x1b[2J", "a\rb", "x\u202ey", "x\u2028y", "x\u2066y"} {
+		if c := Clean(s); c == s || strings.ContainsAny(c, "\x1b\r\u202e\u2028\u2066") {
 			t.Errorf("Clean(%q) = %q", s, c)
 		}
 	}

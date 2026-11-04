@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tranhoangtu-it/twokey/internal/approval"
@@ -32,6 +33,12 @@ const (
 	idleTimeout = 5 * time.Minute
 	// bodyIdleTimeout drops request bodies that stop arriving mid-upload.
 	bodyIdleTimeout = time.Minute
+	// maxHeaderBytes caps the request line and headers of an intercepted
+	// request (net/http's server default).
+	maxHeaderBytes = 1 << 20
+	// spliceIdleTimeout closes tunnels and upgraded connections on which
+	// neither side has sent anything for this long.
+	spliceIdleTimeout = 30 * time.Minute
 )
 
 // Options configures a Server.
@@ -62,6 +69,7 @@ type Server struct {
 	transport   http.RoundTripper
 	upstreamTLS *tls.Config
 	allow       []rules.Allow
+	bodyIdle    time.Duration
 }
 
 // New builds a proxy server.
@@ -69,7 +77,7 @@ func New(o Options) *Server {
 	s := &Server{
 		engine: o.Engine, ca: o.CA, broker: o.Broker, audit: o.Audit,
 		logf: o.Logf, version: o.Version, transport: o.Transport, upstreamTLS: o.UpstreamTLS,
-		allow: o.Allow,
+		allow: o.Allow, bodyIdle: bodyIdleTimeout,
 	}
 	if s.upstreamTLS == nil {
 		s.upstreamTLS = &tls.Config{MinVersion: tls.VersionTLS12}
@@ -158,11 +166,37 @@ func (s *Server) tunnel(client net.Conn, target string) {
 // finish — e.g. a client that sends its request and shuts its write side
 // still gets the full response. Errors tear down both sides.
 func splice(client net.Conn, clientReader io.Reader, upstream net.Conn) {
+	spliceIdle(client, clientReader, upstream, spliceIdleTimeout)
+}
+
+// spliceIdle is splice that closes both sides once neither has sent
+// anything for idle (a quiet direction alone is fine: a long download).
+func spliceIdle(client net.Conn, clientReader io.Reader, upstream net.Conn, idle time.Duration) {
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		tick := time.NewTicker(idle / 4)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				if time.Since(time.Unix(0, last.Load())) > idle {
+					client.Close()
+					upstream.Close()
+					return
+				}
+			}
+		}
+	}()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	pipe := func(dst net.Conn, src io.Reader, srcConn net.Conn) {
 		defer wg.Done()
-		if _, err := io.Copy(dst, src); err != nil {
+		if _, err := io.Copy(dst, activityReader{src, &last}); err != nil {
 			dst.Close()
 			srcConn.Close()
 			return
@@ -172,6 +206,20 @@ func splice(client net.Conn, clientReader io.Reader, upstream net.Conn) {
 	go pipe(upstream, clientReader, client)
 	go pipe(client, upstream, upstream)
 	wg.Wait()
+}
+
+// activityReader records the time of every successful read.
+type activityReader struct {
+	r    io.Reader
+	last *atomic.Int64
+}
+
+func (a activityReader) Read(p []byte) (int, error) {
+	n, err := a.r.Read(p)
+	if n > 0 {
+		a.last.Store(time.Now().UnixNano())
+	}
+	return n, err
 }
 
 func closeWrite(c net.Conn) {

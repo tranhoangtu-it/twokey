@@ -24,20 +24,32 @@ import (
 )
 
 const (
-	comQuit        = 0x01
-	comQuery       = 0x03
-	comStmtPrepare = 0x16
-	clientSSL      = 0x0800
+	comQuit          = 0x01
+	comQuery         = 0x03
+	comStmtPrepare   = 0x16
+	clientCompress   = 0x20
+	clientProtocol41 = 0x0200
+	clientSSL        = 0x0800
+	// clientZstd is CLIENT_ZSTD_COMPRESSION_ALGORITHM (MySQL 8.0.18+).
+	clientZstd = 1 << 26
 	// clientQueryAttributes (MySQL 8.0.23+): COM_QUERY payloads then start
 	// with a parameter count and parameter-set count before the SQL text.
 	clientQueryAttributes = 1 << 27
+	// hiddenCaps are never offered to the client: TLS and compression on
+	// the local hop would hide the SQL from the guard.
+	hiddenCaps = clientSSL | clientCompress | clientZstd
 	// maxPayload marks a packet continued in the next one (16 MiB - 1).
 	maxPayload = 0xffffff
 	// errSpecificAccessDenied is ER_SPECIFIC_ACCESS_DENIED_ERROR.
 	errSpecificAccessDenied = 1227
+	errHandshake            = 1043 // ER_HANDSHAKE_ERROR
 	errConnectionFailed     = 2003
 	dialTimeout             = 15 * time.Second
+	handshakeTimeout        = 30 * time.Second
 	aliveProbe              = 50 * time.Millisecond
+	// DefaultIdleTimeout closes client connections that send nothing for
+	// this long (MySQL's default wait_timeout).
+	DefaultIdleTimeout = 8 * time.Hour
 )
 
 // Options configures a Server.
@@ -51,12 +63,19 @@ type Options struct {
 	// agent stays plaintext so it can be inspected).
 	UpstreamTLS bool
 	TLSConfig   *tls.Config // verification settings for UpstreamTLS
+	// IdleTimeout closes a client that sends nothing for this long
+	// (DefaultIdleTimeout when zero).
+	IdleTimeout time.Duration
 }
 
 // Server proxies client connections to Options.Upstream.
 type Server struct {
 	o     Options
 	guard *sqlhold.Guard
+
+	mu     sync.Mutex
+	conns  map[net.Conn]struct{}
+	closed bool
 }
 
 // New builds a MySQL guard.
@@ -64,7 +83,10 @@ func New(o Options) *Server {
 	if o.Logf == nil {
 		o.Logf = log.Printf
 	}
-	return &Server{o: o, guard: &sqlhold.Guard{
+	if o.IdleTimeout <= 0 {
+		o.IdleTimeout = DefaultIdleTimeout
+	}
+	return &Server{o: o, conns: map[net.Conn]struct{}{}, guard: &sqlhold.Guard{
 		Provider: "mysql", Broker: o.Broker, Audit: o.Audit, Allow: o.Allow, Logf: o.Logf,
 	}}
 }
@@ -83,6 +105,41 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 }
 
+// Close ends every open session (a held statement is then denied as
+// "client went away"). Close the listener to stop Serve.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for c := range s.conns {
+		_ = c.Close()
+	}
+	return nil
+}
+
+func (s *Server) track(c net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.conns[c] = struct{}{}
+	return true
+}
+
+func (s *Server) untrack(c net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.conns, c)
+}
+
+// survive keeps a crash in one connection from killing the guard.
+func (s *Server) survive() {
+	if r := recover(); r != nil {
+		s.o.Logf("mysql guard: connection closed after an internal error: %v", r)
+	}
+}
+
 type session struct {
 	s          *Server
 	client     net.Conn
@@ -91,7 +148,6 @@ type session struct {
 	writeMu    sync.Mutex
 	serverCaps uint32
 	queryAttrs bool // CLIENT_QUERY_ATTRIBUTES negotiated
-	sawLogin   bool
 	// authShift: with upstream TLS our SSLRequest consumed one sequence
 	// number, so during authentication upstream seq = client seq + 1.
 	authShift atomic.Bool
@@ -99,6 +155,11 @@ type session struct {
 
 func (s *Server) handle(client net.Conn) {
 	defer client.Close()
+	defer s.survive()
+	if !s.track(client) {
+		return
+	}
+	defer s.untrack(client)
 	up, err := net.DialTimeout("tcp", s.o.Upstream, dialTimeout)
 	if err != nil {
 		s.o.Logf("mysql upstream %s: %v", s.o.Upstream, err)
@@ -106,14 +167,21 @@ func (s *Server) handle(client net.Conn) {
 		return
 	}
 	defer up.Close()
+	deadline := time.Now().Add(handshakeTimeout)
+	_ = up.SetDeadline(deadline)
+	_ = client.SetDeadline(deadline)
 	ur := bufio.NewReader(up)
-	// The server speaks first. Hide CLIENT_SSL so the local hop stays
-	// plaintext and every command can be inspected.
+	// The server speaks first. Hide TLS and compression so the local hop
+	// stays plaintext and every command can be inspected.
 	seq, greeting, err := readPacket(ur)
 	if err != nil {
 		return
 	}
-	serverCaps := clearSSLCapability(greeting)
+	if len(greeting) == 0 || greeting[0] != 10 {
+		_, _ = client.Write(packet(seq, greeting)) // ERR (e.g. too many connections) or unknown protocol
+		return
+	}
+	serverCaps := hideCapabilities(greeting)
 	if s.o.UpstreamTLS && serverCaps&clientSSL == 0 {
 		_, _ = client.Write(packet(seq, errPacket(errConnectionFailed, "HY000", "twokey: upstream MySQL does not support TLS (drop --upstream-tls)")))
 		return
@@ -122,33 +190,57 @@ func (s *Server) handle(client net.Conn) {
 		return
 	}
 	ss := &session{s: s, client: client, cr: bufio.NewReader(client), upstream: up, serverCaps: serverCaps}
+	rseq, resp, err := readPacket(ss.cr)
+	if err != nil {
+		return
+	}
+	if why := refuseLogin(rseq, resp); why != "" {
+		_, _ = client.Write(packet(rseq+1, errPacket(errHandshake, "08S01", "twokey: "+why)))
+		return
+	}
+	ss.recordLogin(resp)
 	if s.o.UpstreamTLS {
-		tc, err := ss.upgradeUpstream(up)
+		tc, err := ss.upgradeUpstream(up, resp)
 		if err != nil {
 			s.o.Logf("mysql upstream TLS: %v", err)
 			_, _ = client.Write(packet(2, errPacket(errConnectionFailed, "HY000", "twokey: TLS to upstream MySQL failed: "+err.Error())))
 			return
 		}
 		ss.upstream, ur = tc, bufio.NewReader(tc)
+	} else if _, err := up.Write(packet(rseq, resp)); err != nil {
+		return
 	}
+	_ = up.SetDeadline(time.Time{})
+	_ = client.SetDeadline(time.Time{})
 	go func() {
+		defer s.survive()
+		defer client.Close()
 		ss.upstreamToClient(ur)
-		client.Close()
 	}()
 	ss.clientToUpstream()
 }
 
-// upgradeUpstream reads the client's handshake response, sends the server
-// an SSLRequest, switches to TLS and forwards the response inside it.
-func (ss *session) upgradeUpstream(up net.Conn) (*tls.Conn, error) {
-	seq, resp, err := readPacket(ss.cr)
-	if err != nil {
-		return nil, err
-	}
+// refuseLogin checks the client's handshake response: protocol 4.1, and no
+// TLS or compression (both would hide the SQL; they were not offered).
+func refuseLogin(seq byte, resp []byte) string {
 	if seq != 1 || len(resp) < 32 {
-		return nil, errors.New("unexpected handshake response (pre-4.1 clients are not supported)")
+		return "unexpected handshake response (pre-4.1 clients are not supported)"
 	}
-	ss.recordLogin(resp)
+	caps := binary.LittleEndian.Uint32(resp)
+	switch {
+	case caps&clientProtocol41 == 0:
+		return "unexpected handshake response (pre-4.1 clients are not supported)"
+	case caps&clientSSL != 0:
+		return "TLS between the client and twokey is not supported: connect without SSL (e.g. --ssl-mode=DISABLED); the hop to the server can use --upstream-tls"
+	case caps&(clientCompress|clientZstd) != 0:
+		return "compressed connections cannot be inspected: connect without compression (drop --compress / compress=true)"
+	}
+	return ""
+}
+
+// upgradeUpstream sends the server an SSLRequest, switches to TLS and
+// forwards the client's handshake response inside it.
+func (ss *session) upgradeUpstream(up net.Conn, resp []byte) (*tls.Conn, error) {
 	caps := binary.LittleEndian.Uint32(resp) | clientSSL
 	sslRequest := make([]byte, 32) // caps, max packet, charset, 23-byte filler
 	copy(sslRequest, resp[:9])
@@ -175,14 +267,13 @@ func (ss *session) upgradeUpstream(up net.Conn) (*tls.Conn, error) {
 
 // recordLogin notes what client and server agreed on in the handshake.
 func (ss *session) recordLogin(resp []byte) {
-	ss.sawLogin = true
 	clientCaps := binary.LittleEndian.Uint32(resp)
 	ss.queryAttrs = clientCaps&ss.serverCaps&clientQueryAttributes != 0
 }
 
-// clearSSLCapability unsets CLIENT_SSL in a v10 handshake packet (what the
+// hideCapabilities unsets hiddenCaps in a v10 handshake packet (what the
 // client sees) and returns the server's original capability flags.
-func clearSSLCapability(p []byte) uint32 {
+func hideCapabilities(p []byte) uint32 {
 	if len(p) == 0 || p[0] != 10 {
 		return 0 // error packet or unknown protocol: leave untouched
 	}
@@ -195,10 +286,12 @@ func clearSSLCapability(p []byte) uint32 {
 		return 0
 	}
 	lower := binary.LittleEndian.Uint16(p[i:])
-	binary.LittleEndian.PutUint16(p[i:], lower&^clientSSL)
+	binary.LittleEndian.PutUint16(p[i:], lower&^uint16(hiddenCaps&0xffff))
 	caps := uint32(lower)
 	if j := i + 2 + 1 + 2; j+2 <= len(p) { // charset, status flags, then upper caps
-		caps |= uint32(binary.LittleEndian.Uint16(p[j:])) << 16
+		upper := binary.LittleEndian.Uint16(p[j:])
+		binary.LittleEndian.PutUint16(p[j:], upper&^uint16(hiddenCaps>>16))
+		caps |= uint32(upper) << 16
 	}
 	return caps
 }
@@ -253,17 +346,19 @@ func lenencInt(b []byte) (uint64, int, bool) {
 	}
 }
 
+// readPacket reads one packet (at most 16 MiB - 1 by the 3-byte length).
+// The buffer grows with the bytes that actually arrive.
 func readPacket(r *bufio.Reader) (byte, []byte, error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return 0, nil, err
 	}
 	n := int(hdr[0]) | int(hdr[1])<<8 | int(hdr[2])<<16
-	payload := make([]byte, n)
-	if _, err := io.ReadFull(r, payload); err != nil {
+	var buf bytes.Buffer
+	if _, err := io.CopyN(&buf, r, int64(n)); err != nil {
 		return 0, nil, err
 	}
-	return hdr[3], payload, nil
+	return hdr[3], buf.Bytes(), nil
 }
 
 func packet(seq byte, payload []byte) []byte {
@@ -311,12 +406,10 @@ func (ss *session) upstreamToClient(r *bufio.Reader) {
 
 func (ss *session) clientToUpstream() {
 	for {
+		_ = ss.client.SetReadDeadline(time.Now().Add(ss.s.o.IdleTimeout))
 		seq, payload, err := readPacket(ss.cr)
 		if err != nil {
 			return
-		}
-		if !ss.sawLogin && seq == 1 && len(payload) >= 4 {
-			ss.recordLogin(payload) // handshake response (plaintext upstream)
 		}
 		fwdSeq := seq
 		if ss.authShift.Load() {
@@ -327,7 +420,7 @@ func (ss *session) clientToUpstream() {
 			}
 		}
 		// Every command starts a new sequence at 0; auth-phase packets
-		// (handshake response, auth switch) have seq >= 1 and pass through.
+		// (auth switch, more data) have seq >= 1 and pass through.
 		if seq == 0 && len(payload) > 0 && (payload[0] == comQuery || payload[0] == comStmtPrepare) {
 			if denial := ss.check(payload); denial != "" {
 				if ss.writeClient(packet(1, errPacket(errSpecificAccessDenied, "42000", denial))) != nil {
@@ -346,6 +439,8 @@ func (ss *session) clientToUpstream() {
 }
 
 // check returns "" to forward the command, or the error message to return.
+// While a statement is held the client connection is watched: if the
+// client hangs up, the hold ends denied.
 func (ss *session) check(payload []byte) string {
 	if len(payload) == maxPayload {
 		// A multi-packet statement (>= 16 MiB) cannot be inspected whole:
@@ -366,8 +461,17 @@ func (ss *session) check(payload []byte) string {
 		}
 		sql = text
 	}
-	target := "mysql://" + ss.s.o.Upstream
-	msg := ss.s.guard.Check(sqlclass.ClassifyMySQL(sql), target, ss.clientAlive)
+	findings := sqlclass.ClassifyMySQL(sql)
+	if len(findings) == 0 {
+		return ""
+	}
+	ctx, stop := sqlhold.WatchClient(ss.client, ss.cr)
+	defer stop()
+	alive := func() bool {
+		stop()
+		return ctx.Err() == nil && ss.clientAlive()
+	}
+	msg := ss.s.guard.CheckContext(ctx, findings, "mysql://"+ss.s.o.Upstream, alive)
 	if msg == "" {
 		return ""
 	}

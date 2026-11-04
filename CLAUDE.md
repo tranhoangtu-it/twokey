@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 twokey: a local HTTPS proxy + Postgres/MySQL guard that holds destructive cloud API calls made by AI
-agents until a human approves (terminal or phone). Go 1.25, module `github.com/tranhoangtu-it/twokey`.
+agents until a human approves (terminal or phone). Go ≥ 1.26.10, module `github.com/tranhoangtu-it/twokey`.
 User-facing behavior is in README.md; threat model and key handling in SECURITY.md.
 
 ## Commands

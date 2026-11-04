@@ -159,6 +159,7 @@ func TestStalledConsoleNeverBlocksHolds(t *testing.T) {
 	b := NewBroker(100 * time.Millisecond)
 	b.AddNotifier(NewTerminal(b, stalled))
 	const n = outputQueue + 5 // overflow the output queue too
+	b.SetMaxPending(n)        // this test is about the console, not the hold cap
 	done := make(chan Decision, n)
 	for i := 0; i < n; i++ {
 		go func() {
