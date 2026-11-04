@@ -1,0 +1,10 @@
+provider: aiven
+docs: https://api.aiven.io/doc/
+rules:
+  - id: aiven.service.delete
+    hosts: [api.aiven.io]
+    methods: [DELETE]
+    path: /v1/project/{project}/service/{service}
+    resource: "{project}/{service}"
+    severity: critical
+    message: Terminates an Aiven service and permanently deletes its data.

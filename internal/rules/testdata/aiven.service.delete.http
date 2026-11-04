@@ -1,0 +1,17 @@
+# source: https://api.aiven.io/doc/#tag/Service/operation/ServiceDelete
+# resource: my-project/pg-demo
+DELETE https://api.aiven.io/v1/project/my-project/service/pg-demo
+Authorization: aivenv1 $AIVEN_TOKEN
+
+###
+# safe: reading the same service
+GET https://api.aiven.io/v1/project/my-project/service/pg-demo
+Authorization: aivenv1 $AIVEN_TOKEN
+
+###
+# safe: updating the service (enable termination protection)
+PUT https://api.aiven.io/v1/project/my-project/service/pg-demo
+Content-Type: application/json
+Authorization: aivenv1 $AIVEN_TOKEN
+
+{"termination_protection":true}

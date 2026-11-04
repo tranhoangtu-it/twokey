@@ -6,6 +6,8 @@
 package rules
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -28,6 +30,7 @@ type Rule struct {
 	UnlessQuery []string      `yaml:"unless_query"`
 	GraphQL     *GraphQLMatch `yaml:"graphql"`
 	AWS         *AWSMatch     `yaml:"aws"`
+	JSON        *JSONMatch    `yaml:"json"`
 	Resource    string        `yaml:"resource"`
 	Severity    string        `yaml:"severity"`
 	Message     string        `yaml:"message"`
@@ -44,6 +47,16 @@ type GraphQLMatch struct {
 // AWSMatch fires when the AWS API action is one of Actions.
 type AWSMatch struct {
 	Actions []string `yaml:"actions"`
+}
+
+// JSONMatch fires when a field of the JSON request body (dotted path, array
+// indexes as numbers) equals Equals, compared as text: true, 3 and "x" are
+// written "true", "3" and "x". For calls that differ from routine ones only
+// in the body, e.g. a Terraform Cloud run with "is-destroy": true. The
+// flattened body is also available to resource templates as {json.<path>}.
+type JSONMatch struct {
+	Field  string `yaml:"field"`
+	Equals string `yaml:"equals"`
 }
 
 // Pack is the on-disk YAML unit: one provider, many rules.
@@ -136,6 +149,12 @@ func (r *Rule) validate() error {
 	if r.AWS != nil && len(r.AWS.Actions) == 0 {
 		return fmt.Errorf("rule %q: aws.actions is empty", r.ID)
 	}
+	if r.JSON != nil && (r.JSON.Field == "" || r.JSON.Equals == "") {
+		return fmt.Errorf("rule %q: json needs both field and equals", r.ID)
+	}
+	if r.JSON != nil && (r.GraphQL != nil || r.AWS != nil) {
+		return fmt.Errorf("rule %q: json cannot be combined with graphql or aws", r.ID)
+	}
 	for _, h := range r.Hosts {
 		if _, err := path.Match(h, "x"); err != nil {
 			return fmt.Errorf("rule %q: bad host pattern %q", r.ID, h)
@@ -201,7 +220,7 @@ func (e *Engine) Domains() []string {
 func (e *Engine) NeedsBody(host string) bool {
 	h := normalizeHost(host)
 	for _, r := range e.rules {
-		if (r.GraphQL != nil || r.AWS != nil) && r.matchHost(h) {
+		if (r.GraphQL != nil || r.AWS != nil || r.JSON != nil) && r.matchHost(h) {
 			return true
 		}
 	}
@@ -216,6 +235,8 @@ func (e *Engine) Evaluate(req Request) Verdict {
 	var gql *graphqlCalls // parsed lazily, at most once
 	var gqlErr error
 	var aws *awsCall
+	var body map[string]string // flattened JSON body, parsed lazily
+	var bodyErr error
 
 	for _, r := range e.rules {
 		if !r.matchHost(host) {
@@ -260,6 +281,19 @@ func (e *Engine) Evaluate(req Request) Verdict {
 			if aws.action != "" && contains(r.AWS.Actions, aws.action) {
 				v.Matches = append(v.Matches, r.toMatch(aws.action, mergeVars(vars, aws.params)))
 			}
+		case r.JSON != nil:
+			if body == nil && bodyErr == nil {
+				body, bodyErr = flattenBody(req.Body)
+			}
+			if bodyErr != nil {
+				if v.Uninspectable == "" {
+					v.Uninspectable = fmt.Sprintf("JSON body to %s could not be inspected: %v", host, bodyErr)
+				}
+				continue
+			}
+			if body["json."+r.JSON.Field] == r.JSON.Equals {
+				v.Matches = append(v.Matches, r.toMatch(method+" "+r.Path, mergeVars(vars, body)))
+			}
 		default:
 			v.Matches = append(v.Matches, r.toMatch(method+" "+r.Path, vars))
 		}
@@ -285,6 +319,27 @@ func (r *Rule) matchHost(host string) bool {
 		}
 	}
 	return false
+}
+
+// flattenBody turns a JSON body into "json.<dotted.path>" variables. An
+// empty body has no fields (it cannot carry a destroy flag); a body that is
+// not JSON is an error so the caller fails closed.
+func flattenBody(raw []byte) (map[string]string, error) {
+	out := map[string]string{}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return out, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, err
+	}
+	if dec.More() {
+		return nil, errors.New("trailing data after the JSON value")
+	}
+	flattenJSON("json", v, out)
+	return out, nil
 }
 
 // queryVars exposes query parameters to resource templates as

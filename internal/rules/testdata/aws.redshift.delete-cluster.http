@@ -1,0 +1,18 @@
+# source: https://docs.aws.amazon.com/redshift/latest/APIReference/API_DeleteCluster.html
+# resource: mycluster
+POST https://redshift.us-east-2.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DeleteCluster&ClusterIdentifier=mycluster&SkipFinalClusterSnapshot=true&Version=2012-12-01
+###
+# safe: reading the same cluster
+POST https://redshift.us-east-2.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DescribeClusters&ClusterIdentifier=mycluster&Version=2012-12-01
+###
+# safe: pausing the same cluster keeps its data
+POST https://redshift.us-east-2.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=PauseCluster&ClusterIdentifier=mycluster&Version=2012-12-01

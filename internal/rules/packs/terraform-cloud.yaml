@@ -1,0 +1,47 @@
+provider: terraform-cloud
+docs: https://developer.hashicorp.com/terraform/cloud-docs/api-docs
+rules:
+  - id: terraform-cloud.run.destroy
+    # A destroy run differs from a normal run only by a body field.
+    hosts: [app.terraform.io]
+    methods: [POST]
+    path: /api/v2/runs
+    json: { field: data.attributes.is-destroy, equals: "true" }
+    resource: "{json.data.relationships.workspace.data.id}"
+    severity: critical
+    message: Queues a destroy run that tears down every resource the workspace manages.
+  - id: terraform-cloud.workspace.delete
+    hosts: [app.terraform.io]
+    methods: [DELETE]
+    path: /api/v2/workspaces/{workspace}
+    resource: "{workspace}"
+    severity: critical
+    message: Force-deletes an HCP Terraform workspace and its state history, even while it still manages infrastructure.
+  - id: terraform-cloud.workspace.delete-by-name
+    hosts: [app.terraform.io]
+    methods: [DELETE]
+    path: /api/v2/organizations/{org}/workspaces/{workspace}
+    resource: "{org}/{workspace}"
+    severity: critical
+    message: Force-deletes an HCP Terraform workspace and its state history, even while it still manages infrastructure.
+  - id: terraform-cloud.workspace.safe-delete
+    hosts: [app.terraform.io]
+    methods: [POST]
+    path: /api/v2/workspaces/{workspace}/actions/safe-delete
+    resource: "{workspace}"
+    severity: high
+    message: Deletes an HCP Terraform workspace that manages no resources, with its state history.
+  - id: terraform-cloud.workspace.safe-delete-by-name
+    hosts: [app.terraform.io]
+    methods: [POST]
+    path: /api/v2/organizations/{org}/workspaces/{workspace}/actions/safe-delete
+    resource: "{org}/{workspace}"
+    severity: high
+    message: Deletes an HCP Terraform workspace that manages no resources, with its state history.
+  - id: terraform-cloud.organization.delete
+    hosts: [app.terraform.io]
+    methods: [DELETE]
+    path: /api/v2/organizations/{org}
+    resource: "{org}"
+    severity: critical
+    message: Destroys an HCP Terraform organization with all of its workspaces and state.

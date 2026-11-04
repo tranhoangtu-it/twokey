@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/spanner/docs/reference/rest/v1/projects.instances.databases/dropDatabase
+# resource: my-project/prod-spanner/orders
+DELETE https://spanner.googleapis.com/v1/projects/my-project/instances/prod-spanner/databases/orders
+###
+# safe: reading the same database
+GET https://spanner.googleapis.com/v1/projects/my-project/instances/prod-spanner/databases/orders
+###
+# safe: deleting a session only ends a client session
+DELETE https://spanner.googleapis.com/v1/projects/my-project/instances/prod-spanner/databases/orders/sessions/abc123

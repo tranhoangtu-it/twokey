@@ -1,0 +1,17 @@
+# source: https://docs.databricks.com/api/workspace/schemas/delete
+# resource: prod_catalog.sales
+DELETE https://adb-1234567890123456.7.azuredatabricks.net/api/2.1/unity-catalog/schemas/prod_catalog.sales?force=true
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: reading the same schema
+GET https://adb-1234567890123456.7.azuredatabricks.net/api/2.1/unity-catalog/schemas/prod_catalog.sales
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: updating the schema comment
+PATCH https://adb-1234567890123456.7.azuredatabricks.net/api/2.1/unity-catalog/schemas/prod_catalog.sales
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"comment":"sales data"}

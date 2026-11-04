@@ -1,0 +1,16 @@
+# source: https://github.com/npm/cli/blob/latest/workspaces/libnpmpublish/lib/unpublish.js
+# resource: @acme/sdk:sdk-2.0.0.tgz
+DELETE https://registry.npmjs.org/@acme/sdk/-/sdk-2.0.0.tgz/-rev/13-9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d
+Authorization: Bearer TOKEN
+
+###
+# safe: downloading the same tarball
+GET https://registry.npmjs.org/@acme/sdk/-/sdk-2.0.0.tgz
+
+###
+# safe: moving a dist-tag
+PUT https://registry.npmjs.org/-/package/@acme%2fsdk/dist-tags/latest
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+"1.9.0"

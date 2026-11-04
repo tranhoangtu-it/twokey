@@ -1,0 +1,21 @@
+# source: https://github.com/npm/cli/blob/latest/workspaces/libnpmpublish/lib/unpublish.js
+# resource: left-pad
+DELETE https://registry.npmjs.org/left-pad/-rev/12-2e4fbc3a1c8d0f7e9b6a5d4c3b2a1f0e
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the packument (npm install / npm view)
+GET https://registry.npmjs.org/left-pad
+Accept: application/vnd.npm.install-v1+json
+
+###
+# safe: downloading a tarball
+GET https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz
+
+###
+# safe: publishing a new version
+PUT https://registry.npmjs.org/left-pad
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"left-pad","versions":{}}

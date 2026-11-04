@@ -1,0 +1,18 @@
+# source: https://docs.databricks.com/api/workspace/workspace/delete
+POST https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.0/workspace/delete
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"path":"/Users/me@example.com/MyFolder","recursive":true}
+###
+# safe: listing the same directory
+GET https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.0/workspace/list?path=/Users/me@example.com/MyFolder
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: creating a directory
+POST https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.0/workspace/mkdirs
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"path":"/Users/me@example.com/MyFolder/new"}

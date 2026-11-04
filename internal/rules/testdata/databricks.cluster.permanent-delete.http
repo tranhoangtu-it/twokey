@@ -1,0 +1,17 @@
+# source: https://docs.databricks.com/api/workspace/clusters/permanentdelete
+POST https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.1/clusters/permanent-delete
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"cluster_id":"1234-567890-abcde123"}
+###
+# safe: terminating (not permanently deleting) the cluster; it can be restarted
+POST https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.1/clusters/delete
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"cluster_id":"1234-567890-abcde123"}
+###
+# safe: reading the cluster
+GET https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.1/clusters/get?cluster_id=1234-567890-abcde123
+Authorization: Bearer $DATABRICKS_TOKEN

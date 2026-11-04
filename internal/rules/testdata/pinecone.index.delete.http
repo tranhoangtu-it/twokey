@@ -1,0 +1,18 @@
+# source: https://docs.pinecone.io/reference/api/latest/control-plane/delete_index
+# resource: prod-embeddings
+DELETE https://api.pinecone.io/indexes/prod-embeddings
+Api-Key: $PINECONE_API_KEY
+X-Pinecone-Api-Version: 2026-07
+
+###
+# safe: describing the same index
+GET https://api.pinecone.io/indexes/prod-embeddings
+Api-Key: $PINECONE_API_KEY
+
+###
+# safe: configuring the index (enable deletion protection)
+PATCH https://api.pinecone.io/indexes/prod-embeddings
+Content-Type: application/json
+Api-Key: $PINECONE_API_KEY
+
+{"deletion_protection":"enabled"}

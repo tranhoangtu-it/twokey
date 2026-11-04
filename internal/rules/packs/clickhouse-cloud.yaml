@@ -1,0 +1,10 @@
+provider: clickhouse-cloud
+docs: https://clickhouse.com/docs/cloud/manage/api/api-overview
+rules:
+  - id: clickhouse-cloud.service.delete
+    hosts: [api.clickhouse.cloud]
+    methods: [DELETE]
+    path: /v1/organizations/{org}/services/{service}
+    resource: "{org}/{service}"
+    severity: critical
+    message: Deletes a ClickHouse Cloud service and its data.

@@ -1,0 +1,36 @@
+provider: databricks
+docs: https://docs.databricks.com/api/workspace/introduction
+rules:
+  - id: databricks.catalog.delete
+    hosts: &workspaces ["*.cloud.databricks.com", "*.azuredatabricks.net", "*.gcp.databricks.com"]
+    methods: [DELETE]
+    path: /api/2.1/unity-catalog/catalogs/{name}
+    resource: "{name}"
+    severity: critical
+    message: Deletes a Unity Catalog catalog (with force=true, including every schema and table in it).
+  - id: databricks.schema.delete
+    hosts: *workspaces
+    methods: [DELETE]
+    path: /api/2.1/unity-catalog/schemas/{full_name}
+    resource: "{full_name}"
+    severity: critical
+    message: Deletes a Unity Catalog schema (with force=true, including its tables).
+  - id: databricks.table.delete
+    hosts: *workspaces
+    methods: [DELETE]
+    path: /api/2.1/unity-catalog/tables/{full_name}
+    resource: "{full_name}"
+    severity: critical
+    message: Deletes a Unity Catalog table; managed table data is removed.
+  - id: databricks.cluster.permanent-delete
+    hosts: *workspaces
+    methods: [POST]
+    path: /api/{version}/clusters/permanent-delete
+    severity: high
+    message: Permanently deletes a Databricks cluster (cluster_id in the request body); it cannot be restarted or recovered.
+  - id: databricks.workspace-object.delete
+    hosts: *workspaces
+    methods: [POST]
+    path: /api/2.0/workspace/delete
+    severity: high
+    message: Deletes a workspace notebook or directory (path in the body; recursive=true removes the whole tree). Cannot be undone.

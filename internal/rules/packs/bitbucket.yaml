@@ -1,0 +1,17 @@
+provider: bitbucket
+docs: https://developer.atlassian.com/cloud/bitbucket/rest/intro/
+rules:
+  - id: bitbucket.repo.delete
+    hosts: [api.bitbucket.org]
+    methods: [DELETE]
+    path: /2.0/repositories/{workspace}/{repo}
+    resource: "{workspace}/{repo}"
+    severity: critical
+    message: Permanently deletes a Bitbucket repository.
+  - id: bitbucket.branch.delete
+    hosts: [api.bitbucket.org]
+    methods: [DELETE]
+    path: /2.0/repositories/{workspace}/{repo}/refs/branches/{branch...}
+    resource: "{workspace}/{repo}:{branch}"
+    severity: high
+    message: Deletes a repository branch.

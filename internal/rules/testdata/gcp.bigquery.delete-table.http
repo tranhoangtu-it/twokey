@@ -1,0 +1,12 @@
+# source: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/tables/delete
+# resource: my-project/analytics/events
+DELETE https://bigquery.googleapis.com/bigquery/v2/projects/my-project/datasets/analytics/tables/events
+###
+# safe: reading the same table
+GET https://bigquery.googleapis.com/bigquery/v2/projects/my-project/datasets/analytics/tables/events
+###
+# safe: updating the table's metadata
+PATCH https://bigquery.googleapis.com/bigquery/v2/projects/my-project/datasets/analytics/tables/events
+Content-Type: application/json
+
+{"description": "raw events"}

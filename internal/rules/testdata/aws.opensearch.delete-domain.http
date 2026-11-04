@@ -1,0 +1,9 @@
+# source: https://docs.aws.amazon.com/opensearch-service/latest/APIReference/API_DeleteDomain.html
+# resource: search-prod
+DELETE https://es.us-east-1.amazonaws.com/2021-01-01/opensearch/domain/search-prod
+###
+# safe: reading the same domain
+GET https://es.us-east-1.amazonaws.com/2021-01-01/opensearch/domain/search-prod
+###
+# safe: deleting a VPC endpoint is not deleting the domain
+DELETE https://es.us-east-1.amazonaws.com/2021-01-01/opensearch/vpcEndpoints/aos-0123456789

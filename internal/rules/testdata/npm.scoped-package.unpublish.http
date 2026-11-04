@@ -1,0 +1,21 @@
+# source: https://github.com/npm/cli/blob/latest/workspaces/libnpmpublish/lib/unpublish.js
+# resource: @acme/sdk
+DELETE https://registry.npmjs.org/@acme%2fsdk/-rev/12-2e4fbc3a1c8d0f7e9b6a5d4c3b2a1f0e
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the packument
+GET https://registry.npmjs.org/@acme%2fsdk
+Accept: application/vnd.npm.install-v1+json
+
+###
+# safe: downloading a tarball
+GET https://registry.npmjs.org/@acme/sdk/-/sdk-2.0.0.tgz
+
+###
+# safe: publishing a new version
+PUT https://registry.npmjs.org/@acme%2fsdk
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"@acme/sdk","versions":{}}

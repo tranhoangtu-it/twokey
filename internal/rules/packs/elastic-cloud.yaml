@@ -1,0 +1,17 @@
+provider: elastic-cloud
+docs: https://www.elastic.co/docs/api/doc/cloud/
+rules:
+  - id: elastic-cloud.deployment.shutdown
+    hosts: [api.elastic-cloud.com]
+    methods: [POST]
+    path: /api/v1/deployments/{deployment}/_shutdown
+    resource: "{deployment}"
+    severity: critical
+    message: Shuts down (deletes) an Elastic Cloud deployment and all its resources; with skip_snapshot=true no final snapshot is taken.
+  - id: elastic-cloud.serverless-project.delete
+    hosts: [api.elastic-cloud.com]
+    methods: [DELETE]
+    path: /api/v1/serverless/projects/{type}/{project}
+    resource: "{type}/{project}"
+    severity: critical
+    message: Deletes an Elastic Cloud Serverless project (Elasticsearch, Observability or Security) and its data.

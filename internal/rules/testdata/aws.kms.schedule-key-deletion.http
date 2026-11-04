@@ -1,0 +1,21 @@
+# source: https://docs.aws.amazon.com/kms/latest/APIReference/API_ScheduleKeyDeletion.html
+# resource: 1234abcd-12ab-34cd-56ef-1234567890ab
+POST https://kms.us-east-2.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: TrentService.ScheduleKeyDeletion
+
+{"PendingWindowInDays": 7, "KeyId": "1234abcd-12ab-34cd-56ef-1234567890ab"}
+###
+# safe: reading the same key
+POST https://kms.us-east-2.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: TrentService.DescribeKey
+
+{"KeyId": "1234abcd-12ab-34cd-56ef-1234567890ab"}
+###
+# safe: cancelling a scheduled deletion
+POST https://kms.us-east-2.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: TrentService.CancelKeyDeletion
+
+{"KeyId": "1234abcd-12ab-34cd-56ef-1234567890ab"}

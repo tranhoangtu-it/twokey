@@ -1,0 +1,18 @@
+# source: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/workspaces#safe-delete-a-workspace
+# resource: my-organization/workspace-1
+POST https://app.terraform.io/api/v2/organizations/my-organization/workspaces/workspace-1/actions/safe-delete
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+###
+# safe: reading the same workspace
+GET https://app.terraform.io/api/v2/organizations/my-organization/workspaces/workspace-1
+Authorization: Bearer TOKEN
+
+###
+# safe: creating a workspace
+POST https://app.terraform.io/api/v2/organizations/my-organization/workspaces
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"workspaces","attributes":{"name":"workspace-2"}}}

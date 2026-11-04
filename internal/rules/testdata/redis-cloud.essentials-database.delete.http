@@ -1,0 +1,20 @@
+# source: https://redis.io/docs/latest/operate/rc/api/api-reference#tag/Databases-Essentials/operation/deleteFixedDatabaseByID_1
+# resource: 98765/12
+DELETE https://api.redislabs.com/v1/fixed/subscriptions/98765/databases/12
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: reading the same database
+GET https://api.redislabs.com/v1/fixed/subscriptions/98765/databases/12
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: updating the database
+PUT https://api.redislabs.com/v1/fixed/subscriptions/98765/databases/12
+Content-Type: application/json
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+{"name":"cache-prod"}

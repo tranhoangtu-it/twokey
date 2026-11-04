@@ -1,0 +1,14 @@
+# source: https://www.elastic.co/docs/api/doc/cloud/operation/operation-shutdown-deployment
+# resource: 6d1b2c3a4e5f60718293a4b5c6d7e8f9
+POST https://api.elastic-cloud.com/api/v1/deployments/6d1b2c3a4e5f60718293a4b5c6d7e8f9/_shutdown?skip_snapshot=true
+Authorization: ApiKey $EC_API_KEY
+
+###
+# safe: reading the same deployment
+GET https://api.elastic-cloud.com/api/v1/deployments/6d1b2c3a4e5f60718293a4b5c6d7e8f9
+Authorization: ApiKey $EC_API_KEY
+
+###
+# safe: restoring a shut-down deployment
+POST https://api.elastic-cloud.com/api/v1/deployments/6d1b2c3a4e5f60718293a4b5c6d7e8f9/_restore
+Authorization: ApiKey $EC_API_KEY

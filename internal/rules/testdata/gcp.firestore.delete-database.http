@@ -1,0 +1,12 @@
+# source: https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases/delete
+# resource: my-project/prod-db
+DELETE https://firestore.googleapis.com/v1/projects/my-project/databases/prod-db
+###
+# safe: reading the same database
+GET https://firestore.googleapis.com/v1/projects/my-project/databases/prod-db
+###
+# safe: exporting the database's documents
+POST https://firestore.googleapis.com/v1/projects/my-project/databases/prod-db:exportDocuments
+Content-Type: application/json
+
+{"outputUriPrefix": "gs://my-backups/firestore"}

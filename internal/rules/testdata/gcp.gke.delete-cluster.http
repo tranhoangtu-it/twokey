@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters/delete
+# resource: my-project/us-central1/prod
+DELETE https://container.googleapis.com/v1/projects/my-project/locations/us-central1/clusters/prod
+###
+# safe: reading the same cluster
+GET https://container.googleapis.com/v1/projects/my-project/locations/us-central1/clusters/prod
+###
+# safe: deleting a node pool keeps the cluster
+DELETE https://container.googleapis.com/v1/projects/my-project/locations/us-central1/clusters/prod/nodePools/batch

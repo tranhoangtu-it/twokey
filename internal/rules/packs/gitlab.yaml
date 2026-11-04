@@ -1,0 +1,56 @@
+provider: gitlab
+docs: https://docs.gitlab.com/api/rest/
+# GitLab addresses a project by numeric id or by its URL-encoded path
+# ("acme%2Fapi"). Request paths reach the engine decoded, so an encoded
+# path spans two segments: "*-by-path" rules cover namespace/project.
+# Nested-group paths (group/sub/project) are not covered.
+rules:
+  - id: gitlab.project.delete
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/projects/{id}
+    resource: "{id}"
+    severity: critical
+    message: Deletes a GitLab project with its repository, issues and merge requests.
+  - id: gitlab.project.delete-by-path
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/projects/{namespace}/{project}
+    resource: "{namespace}/{project}"
+    severity: critical
+    message: Deletes a GitLab project (addressed by namespace/project path) with its repository, issues and merge requests.
+  - id: gitlab.group.delete
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/groups/{id}
+    resource: "{id}"
+    severity: critical
+    message: Deletes a GitLab group with all of its subgroups and projects.
+  - id: gitlab.branch.delete
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/projects/{id}/repository/branches/{branch...}
+    resource: "{id}:{branch}"
+    severity: high
+    message: Deletes a repository branch.
+  - id: gitlab.branch.delete-by-path
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/projects/{namespace}/{project}/repository/branches/{branch...}
+    resource: "{namespace}/{project}:{branch}"
+    severity: high
+    message: Deletes a repository branch.
+  - id: gitlab.environment.delete
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/projects/{id}/environments/{environment}
+    resource: "{id}:{environment}"
+    severity: high
+    message: Deletes a deployment environment (or, for "review_apps", all stopped review apps).
+  - id: gitlab.environment.delete-by-path
+    hosts: [gitlab.com]
+    methods: [DELETE]
+    path: /api/v4/projects/{namespace}/{project}/environments/{environment}
+    resource: "{namespace}/{project}:{environment}"
+    severity: high
+    message: Deletes a deployment environment (or, for "review_apps", all stopped review apps).

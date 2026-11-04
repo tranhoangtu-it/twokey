@@ -1,0 +1,17 @@
+# source: https://redis.io/docs/latest/operate/rc/api/api-reference#tag/Databases-Pro/operation/flushCrdb
+# resource: 123456/51
+PUT https://api.redislabs.com/v1/subscriptions/123456/databases/51/flush
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: reading the database
+GET https://api.redislabs.com/v1/subscriptions/123456/databases/51
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: checking import status
+GET https://api.redislabs.com/v1/subscriptions/123456/databases/51/import
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY

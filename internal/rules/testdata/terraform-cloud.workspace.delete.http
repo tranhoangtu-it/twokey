@@ -1,0 +1,18 @@
+# source: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/workspaces#force-delete-a-workspace
+# resource: ws-SihZTyXKfNXUWuUa
+DELETE https://app.terraform.io/api/v2/workspaces/ws-SihZTyXKfNXUWuUa
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+###
+# safe: reading the same workspace
+GET https://app.terraform.io/api/v2/workspaces/ws-SihZTyXKfNXUWuUa
+Authorization: Bearer TOKEN
+
+###
+# safe: locking the workspace
+POST https://app.terraform.io/api/v2/workspaces/ws-SihZTyXKfNXUWuUa/actions/lock
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+{"reason":"Locking workspace-1"}

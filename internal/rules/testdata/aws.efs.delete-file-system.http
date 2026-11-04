@@ -1,0 +1,9 @@
+# source: https://docs.aws.amazon.com/efs/latest/ug/API_DeleteFileSystem.html
+# resource: fs-01234567
+DELETE https://elasticfilesystem.us-west-2.amazonaws.com/2015-02-01/file-systems/fs-01234567
+###
+# safe: reading the same file system
+GET https://elasticfilesystem.us-west-2.amazonaws.com/2015-02-01/file-systems?FileSystemId=fs-01234567
+###
+# safe: deleting a mount target only removes a network endpoint, not data
+DELETE https://elasticfilesystem.us-west-2.amazonaws.com/2015-02-01/mount-targets/fsmt-0123abcd
