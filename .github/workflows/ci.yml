@@ -25,6 +25,31 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: go mod tidy && git diff --exit-code go.mod go.sum
 
+  # The real binary, the way users run it: twokey up + an agent through
+  # twokey run + a human answering in the up window (and a real Postgres
+  # behind twokey pg on Linux).
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Start Postgres (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:17
+          for i in $(seq 1 60); do docker exec pg pg_isready -U postgres && break; sleep 1; done
+          echo "TWOKEY_E2E_PG=127.0.0.1:55432" >> "$GITHUB_ENV"
+      - run: go test -tags e2e -count=1 -v ./e2e/
+
   goreleaser-check:
     runs-on: ubuntu-latest
     steps:

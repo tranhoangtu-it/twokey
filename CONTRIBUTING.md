@@ -48,5 +48,9 @@ GraphQL path). If you're unsure, run the CLI through `twokey up` and look at the
 ## Code changes
 
 - `go vet ./... && go test -race ./...` must pass; CI runs on Linux, macOS and Windows.
+- End-to-end tests run the real binary (`twokey up` + `twokey run` + a human answer, and `twokey pg`
+  in front of a real Postgres): `go test -tags e2e ./e2e/` (needs Python and network; set
+  `TWOKEY_E2E_PG=host:port` of a disposable Postgres with user `postgres` / password `postgres` for the
+  database test). CI runs them on all three OSes.
 - Keep the threat model in mind (README): accidents, not a malicious agent.
 - Bypasses of an existing rule are security issues — see [SECURITY.md](SECURITY.md).
