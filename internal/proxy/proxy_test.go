@@ -231,6 +231,23 @@ func TestDeniedDestructiveRequestNeverReachesUpstream(t *testing.T) {
 	}
 }
 
+func TestPlainHTTPDestructiveRequestIsHeld(t *testing.T) {
+	h := newHarness(t)
+	target := "http://" + h.upstream.Listener.Addr().String() + "/repos/acme/api"
+	req, _ := http.NewRequest("DELETE", target, nil)
+	resp, err := h.client("").Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("X-Twokey") != "blocked" {
+		t.Fatalf("want 403 blocked, got %d %v", resp.StatusCode, resp.Header)
+	}
+	if h.decider.holds.Load() != 1 || h.upstreamHits.Load() != 0 {
+		t.Fatalf("holds=%d upstreamHits=%d", h.decider.holds.Load(), h.upstreamHits.Load())
+	}
+}
+
 func TestApprovedDestructiveRequestIsForwarded(t *testing.T) {
 	h := newHarness(t)
 	h.decider.approve.Store(true)
