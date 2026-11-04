@@ -71,7 +71,7 @@ func (n *Ntfy) Notify(r Request) {
 	msg := ntfyMessage{
 		Topic:    n.topic,
 		Title:    "🛑 Agent wants to run a destructive action",
-		Message:  fmt.Sprintf("%s\n%s %s\nHold #%s", r.Summary(), r.Method, r.URL, r.ID),
+		Message:  fmt.Sprintf("%s\n%s %s\nHold #%s", r.Summary(), Clean(r.Method), Clean(r.URL), r.ID),
 		Priority: 5,
 		Tags:     []string{"rotating_light"},
 		Actions: []ntfyAction{
@@ -88,6 +88,24 @@ func (n *Ntfy) Notify(r Request) {
 
 // Closed is a no-op: tapping a button clears the notification on the phone.
 func (n *Ntfy) Closed(Request, Decision) {}
+
+// Granted tells the phone that a timed approval let a request through, so
+// a phone-only user sees every destructive call, held or not. No buttons:
+// there is nothing left to decide.
+func (n *Ntfy) Granted(r Request, d Decision) {
+	msg := ntfyMessage{
+		Topic:    n.topic,
+		Title:    "✓ Auto-approved by a timed approval",
+		Message:  fmt.Sprintf("%s\n%s %s\n%s", r.Summary(), Clean(r.Method), Clean(r.URL), d.Reason),
+		Priority: 3,
+		Tags:     []string{"hourglass"},
+	}
+	go func() {
+		if err := n.publish(msg); err != nil {
+			n.logf("ntfy: grant notice #%s failed: %v", r.ID, err)
+		}
+	}()
+}
 
 func (n *Ntfy) publish(msg ntfyMessage) error {
 	body, err := json.Marshal(msg)

@@ -44,14 +44,21 @@ type FixtureFailure struct {
 
 // ParseFixture parses a .http fixture for rule name.
 func ParseFixture(name string, data []byte) (Fixture, error) {
-	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	var sections [][]string
 	cur := []string{}
-	for _, line := range strings.Split(text, "\n") {
+	for i, line := range lines {
 		if strings.TrimSpace(line) == "###" {
-			sections = append(sections, cur)
-			cur = []string{}
-			continue
+			next, ok := nextNonEmpty(lines[i+1:])
+			if !ok {
+				break // trailing separator
+			}
+			if strings.HasPrefix(next, "#") || isRequestLine(next) {
+				sections = append(sections, cur)
+				cur = []string{}
+				continue
+			}
+			// otherwise "###" is part of a body
 		}
 		cur = append(cur, line)
 	}
@@ -76,6 +83,25 @@ func ParseFixture(name string, data []byte) (Fixture, error) {
 		return Fixture{}, fmt.Errorf("%s: add at least one request after '###' that must not be held", name)
 	}
 	return f, nil
+}
+
+func nextNonEmpty(lines []string) (string, bool) {
+	for _, l := range lines {
+		if t := strings.TrimSpace(l); t != "" {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+// isRequestLine reports "METHOD absolute-URL [HTTP/x]".
+func isRequestLine(l string) bool {
+	parts := strings.Fields(l)
+	if len(parts) < 2 || len(parts) > 3 || parts[0] != strings.ToUpper(parts[0]) {
+		return false
+	}
+	u, err := url.Parse(parts[1])
+	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
 func parseCase(lines []string) (FixtureCase, error) {

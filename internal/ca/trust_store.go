@@ -71,6 +71,11 @@ func twokeyThumbprint(data []byte) (string, bool) {
 	return strings.ToUpper(hex.EncodeToString(sum[:])), true
 }
 
+// RestrictToUser limits a secret file (e.g. the phone-approval topic) to
+// the current user, like the CA key. On Unix it is a no-op: such files are
+// written 0600.
+func RestrictToUser(path string) error { return restrictKeyACL(path) }
+
 // HardenKey restricts an existing CA key to the current user (Windows ACL;
 // Unix keys are already written 0600). Safe to call repeatedly.
 func HardenKey(dir string) error {

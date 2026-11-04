@@ -16,6 +16,7 @@ import (
 
 	"github.com/tranhoangtu-it/twokey/internal/approval"
 	"github.com/tranhoangtu-it/twokey/internal/audit"
+	"github.com/tranhoangtu-it/twokey/internal/ca"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
 	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
@@ -206,6 +207,8 @@ func phoneTopic(dir string, rotate bool) (string, error) {
 	if !rotate {
 		if data, err := os.ReadFile(path); err == nil {
 			if t := strings.TrimSpace(string(data)); t != "" {
+				// Topics from older versions kept the folder's ACL on Windows.
+				_ = ca.RestrictToUser(path)
 				return t, nil
 			}
 		}
@@ -228,6 +231,10 @@ func phoneTopic(dir string, rotate bool) (string, error) {
 	defer f.Close()
 	if _, err := f.WriteString(topic + "\n"); err != nil {
 		return "", err
+	}
+	// Anyone who can read the topic can approve; Windows ignores 0600.
+	if err := ca.RestrictToUser(path); err != nil {
+		return "", fmt.Errorf("restrict %s: %w", path, err)
 	}
 	return topic, nil
 }

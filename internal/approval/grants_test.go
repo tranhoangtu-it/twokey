@@ -2,6 +2,9 @@ package approval
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +167,33 @@ func TestTerminalApproveForCreatesGrant(t *testing.T) {
 	term.Handle("revoke 1")
 	if b.Grants().Covers(held("github.repo.delete", "acme/x")) {
 		t.Fatal("revoke via terminal failed")
+	}
+}
+
+// A phone-only user must learn when a timed approval lets something through.
+func TestNtfyAnnouncesGrantedRequestsWithoutButtons(t *testing.T) {
+	published := make(chan ntfyMessage, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m ntfyMessage
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		published <- m
+	}))
+	defer srv.Close()
+	b := NewBroker(time.Hour)
+	b.AddNotifier(NewNtfy(srv.URL, "secret-topic", b))
+	if _, err := b.Grants().AddFor(held("github.repo.delete", "acme/x"), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, d := b.Decide(context.Background(), held("github.repo.delete", "acme/x")); d.By != "grant" {
+		t.Fatalf("decision %+v", d)
+	}
+	select {
+	case m := <-published:
+		if len(m.Actions) != 0 || !strings.Contains(m.Message, "acme/x") || !strings.Contains(m.Message, "timed approval") {
+			t.Fatalf("unexpected grant notice: %+v", m)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no phone notice for an auto-approved request")
 	}
 }
 

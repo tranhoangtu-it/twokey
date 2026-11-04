@@ -42,6 +42,20 @@ func TestParseFixture(t *testing.T) {
 	}
 }
 
+// "###" is a separator only when a request (or its comments) follows, so a
+// body line that happens to be "###" stays in the body; a trailing "###" is
+// ignored.
+func TestParseFixtureSeparatorEdgeCases(t *testing.T) {
+	src := "# source: x\nPOST https://api.github.com/graphql\n\nline one\n###\nline three\n###\n# safe\nGET https://api.github.com/x\n###\n"
+	f, err := ParseFixture("github.graphql.delete", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(f.Held.Req.Body) != "line one\n###\nline three" || len(f.Safe) != 1 {
+		t.Fatalf("body=%q safe=%d", f.Held.Req.Body, len(f.Safe))
+	}
+}
+
 func TestParseFixtureRejectsIncompleteFiles(t *testing.T) {
 	cases := map[string]string{
 		"no source":       "DELETE https://api.github.com/repos/a/b\n###\nGET https://api.github.com/repos/a/b\n",
