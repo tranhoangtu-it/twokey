@@ -1,0 +1,21 @@
+# source: https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_DeleteTable.html
+# resource: Orders
+POST https://dynamodb.us-east-1.amazonaws.com/
+Content-Type: application/x-amz-json-1.0
+X-Amz-Target: DynamoDB_20120810.DeleteTable
+
+{"TableName": "Orders"}
+###
+# safe: reading the same table's metadata
+POST https://dynamodb.us-east-1.amazonaws.com/
+Content-Type: application/x-amz-json-1.0
+X-Amz-Target: DynamoDB_20120810.DescribeTable
+
+{"TableName": "Orders"}
+###
+# safe: backing up the same table is not a delete
+POST https://dynamodb.us-east-1.amazonaws.com/
+Content-Type: application/x-amz-json-1.0
+X-Amz-Target: DynamoDB_20120810.CreateBackup
+
+{"TableName": "Orders", "BackupName": "orders-manual"}

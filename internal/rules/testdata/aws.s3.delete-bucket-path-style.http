@@ -1,0 +1,9 @@
+# source: https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteBucket.html
+# resource: amzn-s3-demo-bucket--usw2-az1--x-s3
+DELETE https://s3express-control.us-west-2.amazonaws.com/amzn-s3-demo-bucket--usw2-az1--x-s3
+###
+# safe: listing a bucket path-style
+GET https://s3.us-east-1.amazonaws.com/amzn-s3-demo-bucket?list-type=2
+###
+# safe: DeleteBucketLifecycle removes a subresource, not the bucket
+DELETE https://s3.us-east-1.amazonaws.com/amzn-s3-demo-bucket?lifecycle

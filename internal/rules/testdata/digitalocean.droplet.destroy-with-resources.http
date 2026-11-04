@@ -1,0 +1,10 @@
+# source: https://docs.digitalocean.com/reference/api/digitalocean/#tag/Droplets/operation/droplets_destroy_withAssociatedResourcesDangerous
+# resource: 3164444
+DELETE https://api.digitalocean.com/v2/droplets/3164444/destroy_with_associated_resources/dangerous
+X-Dangerous: true
+###
+# safe: listing the associated resources
+GET https://api.digitalocean.com/v2/droplets/3164444/destroy_with_associated_resources
+###
+# safe: checking the status of a destroy
+GET https://api.digitalocean.com/v2/droplets/3164444/destroy_with_associated_resources/status

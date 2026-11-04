@@ -35,6 +35,8 @@ func cmdUp(args []string) error {
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic (default: the one from `twokey phone`)")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
 	allow := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
+	observe := fs.Bool("observe", false, "try twokey safely: log and audit what would be held, but hold nothing")
+	noDesktop := fs.Bool("no-desktop", false, "no native desktop notification when a request is held")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -43,6 +45,7 @@ func cmdUp(args []string) error {
 	p, err := startProxy(ctx, proxyConfig{
 		addr: *addr, timeout: *timeout, rulesDir: *rulesDir, phone: *phone,
 		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr, allowFile: *allow,
+		observe: *observe, noDesktop: *noDesktop,
 	})
 	if err != nil {
 		return err
@@ -157,16 +160,18 @@ func cmdRun(args []string) error {
 	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+")")
 	strict := fs.Bool("strict", false, "run the agent in a Docker container whose only network egress is twokey")
 	image := fs.String("image", "", "with --strict: container image that contains the agent")
+	observe := fs.Bool("observe", false, "one-terminal trial mode: in-process proxy that logs what would be held but holds nothing")
+	noDesktop := fs.Bool("no-desktop", false, "with --phone: no native desktop notification when a request is held")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	argv := fs.Args()
 	if len(argv) == 0 {
-		return errors.New("usage: twokey run [--addr A | --phone] -- <agent> [args...]")
+		return errors.New("usage: twokey run [--addr A | --phone | --observe] -- <agent> [args...]")
 	}
 
 	proxyAddr := *addr
-	if *phone {
+	if *phone || *observe {
 		home, err := homeDir()
 		if err != nil {
 			return setupFailure(err)
@@ -186,6 +191,8 @@ func cmdRun(args []string) error {
 			ntfyTopic: os.Getenv("TWOKEY_NTFY_TOPIC"), ntfyServer: envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"),
 			logTo:     logFile, // keep diagnostics out of the agent's TUI
 			allowFile: *allow,
+			observe:   *observe,
+			noDesktop: *noDesktop,
 		})
 		if err != nil {
 			return setupFailure(err)
@@ -207,7 +214,11 @@ func cmdRun(args []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = runenv.Apply(os.Environ(), vars)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — destructive cloud API calls need your approval\n", argv[0], proxyAddr)
+	if *observe {
+		fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — OBSERVE MODE: destructive calls are logged, NOT held\n", argv[0], proxyAddr)
+	} else {
+		fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — destructive cloud API calls need your approval\n", argv[0], proxyAddr)
+	}
 
 	// Ctrl+C belongs to the agent; twokey just waits for it to exit.
 	signal.Notify(make(chan os.Signal, 1), os.Interrupt)

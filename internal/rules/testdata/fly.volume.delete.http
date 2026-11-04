@@ -1,0 +1,17 @@
+# source: https://docs.fly.io/machines/api/volumes-resource
+# resource: my-app-name/vol_1234567890abcdef
+DELETE https://api.machines.dev/v1/apps/my-app-name/volumes/vol_1234567890abcdef
+Authorization: Bearer $FLY_API_TOKEN
+
+###
+# safe: reading the same volume
+GET https://api.machines.dev/v1/apps/my-app-name/volumes/vol_1234567890abcdef
+Authorization: Bearer $FLY_API_TOKEN
+
+###
+# safe: extending the volume
+PUT https://api.machines.dev/v1/apps/my-app-name/volumes/vol_1234567890abcdef/extend
+Authorization: Bearer $FLY_API_TOKEN
+Content-Type: application/json
+
+{"size_gb":10}

@@ -1,0 +1,20 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> volumeInstanceBackupDelete(volumeInstanceBackupId: String!, volumeInstanceId: String!)
+# resource: backup-7a1
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+Authorization: Bearer TOKEN
+
+{"query":"mutation volumeInstanceBackupDelete($volumeInstanceBackupId: String!, $volumeInstanceId: String!) { volumeInstanceBackupDelete(volumeInstanceBackupId: $volumeInstanceBackupId, volumeInstanceId: $volumeInstanceId) { workflowId } }","variables":{"volumeInstanceBackupId":"backup-7a1","volumeInstanceId":"vi-42"}}
+###
+# safe: listing backups of the same volume instance
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { volumeInstanceBackupList(volumeInstanceId: \"vi-42\") { id name } }"}
+###
+# safe: creating a backup is not a delete
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation { volumeInstanceBackupCreate(volumeInstanceId: \"vi-42\") }"}

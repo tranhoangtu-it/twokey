@@ -19,5 +19,30 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Package managers. They publish to tranhoangtu-it/homebrew-tap and
+# tranhoangtu-it/scoop-bucket with the TAP_GITHUB_TOKEN secret; without it
+# the upload is skipped and the GitHub release still succeeds.
+homebrew_casks:
+  - name: twokey
+    repository:
+      owner: tranhoangtu-it
+      name: homebrew-tap
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+    homepage: https://github.com/tranhoangtu-it/twokey
+    description: Make your AI agent ask a human before it deletes prod
+    license: MIT
+    skip_upload: '{{ if eq (envOrDefault "TAP_GITHUB_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+
+scoops:
+  - name: twokey
+    repository:
+      owner: tranhoangtu-it
+      name: scoop-bucket
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+    homepage: https://github.com/tranhoangtu-it/twokey
+    description: Make your AI agent ask a human before it deletes prod
+    license: MIT
+    skip_upload: '{{ if eq (envOrDefault "TAP_GITHUB_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+
 changelog:
   sort: asc

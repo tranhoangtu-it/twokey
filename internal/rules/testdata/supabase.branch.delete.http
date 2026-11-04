@@ -1,0 +1,17 @@
+# source: https://supabase.com/docs/reference/api/v1-delete-a-branch
+# resource: qrstuvwxyzabcdefghij
+DELETE https://api.supabase.com/v1/branches/qrstuvwxyzabcdefghij
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+
+###
+# safe: reading the same branch
+GET https://api.supabase.com/v1/branches/qrstuvwxyzabcdefghij
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+
+###
+# safe: updating branch config
+PATCH https://api.supabase.com/v1/branches/qrstuvwxyzabcdefghij
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+Content-Type: application/json
+
+{"branch_name":"feature-x"}

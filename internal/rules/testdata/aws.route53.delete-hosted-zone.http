@@ -1,0 +1,12 @@
+# source: https://docs.aws.amazon.com/Route53/latest/APIReference/API_DeleteHostedZone.html
+# resource: Z1PA6795UKMFR9
+DELETE https://route53.amazonaws.com/2013-04-01/hostedzone/Z1PA6795UKMFR9
+###
+# safe: reading the same hosted zone
+GET https://route53.amazonaws.com/2013-04-01/hostedzone/Z1PA6795UKMFR9
+###
+# safe: creating a hosted zone
+POST https://route53.amazonaws.com/2013-04-01/hostedzone
+Content-Type: application/xml
+
+<CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/"><Name>example.com</Name><CallerReference>ref-1</CallerReference></CreateHostedZoneRequest>

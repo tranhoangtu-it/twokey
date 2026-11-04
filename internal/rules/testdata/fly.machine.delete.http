@@ -1,0 +1,18 @@
+# source: https://docs.fly.io/machines/api/machines-resource
+# resource: my-app-name/24d896dec64879
+DELETE https://api.machines.dev/v1/apps/my-app-name/machines/24d896dec64879?force=true
+Authorization: Bearer $FLY_API_TOKEN
+Content-Type: application/json
+
+###
+# safe: reading the same machine
+GET https://api.machines.dev/v1/apps/my-app-name/machines/24d896dec64879
+Authorization: Bearer $FLY_API_TOKEN
+
+###
+# safe: stopping a machine is reversible
+POST https://api.machines.dev/v1/apps/my-app-name/machines/24d896dec64879/stop
+Authorization: Bearer $FLY_API_TOKEN
+Content-Type: application/json
+
+{}

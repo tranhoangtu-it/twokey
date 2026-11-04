@@ -1,0 +1,18 @@
+# source: https://docs.aws.amazon.com/AmazonRDS/latest/APIReference/API_DeleteDBInstance.html
+# resource: prod-db
+POST https://rds.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DeleteDBInstance&DBInstanceIdentifier=prod-db&SkipFinalSnapshot=true&Version=2014-10-31
+###
+# safe: reading the same instance
+POST https://rds.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DescribeDBInstances&DBInstanceIdentifier=prod-db&Version=2014-10-31
+###
+# safe: taking a snapshot of the same instance is not a delete
+POST https://rds.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=CreateDBSnapshot&DBInstanceIdentifier=prod-db&DBSnapshotIdentifier=prod-db-manual&Version=2014-10-31

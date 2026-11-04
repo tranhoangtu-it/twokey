@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/compute/docs/reference/rest/v1/instances/delete
+# resource: my-project/us-central1-a/web-1
+DELETE https://compute.googleapis.com/compute/v1/projects/my-project/zones/us-central1-a/instances/web-1
+###
+# safe: reading the same VM
+GET https://compute.googleapis.com/compute/v1/projects/my-project/zones/us-central1-a/instances/web-1
+###
+# safe: stopping (not deleting) the same VM
+POST https://compute.googleapis.com/compute/v1/projects/my-project/zones/us-central1-a/instances/web-1/stop

@@ -37,3 +37,24 @@ rules:
     resource: "{id}"
     severity: high
     message: Deletes a Railway service.
+  - id: railway.volume-backup.restore
+    hosts: [backboard.railway.com, backboard.railway.app]
+    path: /graphql/{endpoint}
+    graphql: { mutations: [volumeInstanceBackupRestore] }
+    resource: "{volumeInstanceId}"
+    severity: critical
+    message: Restores a backup over a live Railway volume, replacing its current data (wipeServiceIds are wiped).
+  - id: railway.project.schedule-delete
+    hosts: [backboard.railway.com, backboard.railway.app]
+    path: /graphql/{endpoint}
+    graphql: { mutations: [projectScheduleDelete, projectScheduleDeleteForce] }
+    resource: "{id}"
+    severity: critical
+    message: Schedules (or forces) deletion of an entire Railway project.
+  - id: railway.workspace.delete
+    hosts: [backboard.railway.com, backboard.railway.app]
+    path: /graphql/{endpoint}
+    graphql: { mutations: [workspaceDelete] }
+    resource: "{id}"
+    severity: critical
+    message: Deletes a Railway workspace and every project in it.

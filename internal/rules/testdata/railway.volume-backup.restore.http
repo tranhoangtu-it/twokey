@@ -1,0 +1,19 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> volumeInstanceBackupRestore(replicaServiceIds, volumeInstanceBackupId, volumeInstanceId, wipeServiceIds)
+# resource: vi-42
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation volumeInstanceBackupRestore($volumeInstanceBackupId: String!, $volumeInstanceId: String!) { volumeInstanceBackupRestore(volumeInstanceBackupId: $volumeInstanceBackupId, volumeInstanceId: $volumeInstanceId) }","variables":{"volumeInstanceBackupId":"backup-7a1","volumeInstanceId":"vi-42"}}
+###
+# safe: listing backups
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { volumeInstanceBackupList(volumeInstanceId: \"vi-42\") { id name } }"}
+###
+# safe: point-in-time restore into a NEW service does not overwrite the volume
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation { volumeInstancePITRRestore(volumeInstanceId: \"vi-42\", newServiceName: \"pg-restored\", targetTimestamp: \"2026-11-01T00:00:00Z\") }"}

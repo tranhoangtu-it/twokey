@@ -16,6 +16,7 @@ import (
 
 	"github.com/tranhoangtu-it/twokey/internal/approval"
 	"github.com/tranhoangtu-it/twokey/internal/audit"
+	"github.com/tranhoangtu-it/twokey/internal/ca"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
 	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
@@ -40,7 +41,12 @@ type proxyConfig struct {
 	terminal   bool      // approvals typed into this process's stdin
 	logTo      io.Writer // where proxy diagnostics go
 	allowFile  string    // pre-approved operations (default: ./.twokey-allow.yaml if present)
+	observe    bool      // log and audit would-be holds but forward everything
+	noDesktop  bool      // no native desktop notification on holds
 }
+
+// observeChannel is the banner line for observe mode.
+const observeChannel = "OBSERVE MODE — nothing is held; would-be holds are logged and audited as by=observe (NOT PROTECTED)"
 
 // defaultAllowFile is picked up from the current (project) directory.
 const defaultAllowFile = ".twokey-allow.yaml"
@@ -128,13 +134,20 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "  rules    %d destructive operations across %d providers (only those hosts are inspected)\n", len(rules), len(providers))
+	label := "approve"
+	if c.observe {
+		label = "mode"
+	}
 	for _, ch := range channels {
-		fmt.Fprintf(&b, "  approve  %s\n", ch)
+		fmt.Fprintf(&b, "  %-8s %s\n", label, ch)
 	}
 	if len(allows) > 0 {
 		fmt.Fprintf(&b, "  allow    %d pre-approved operation(s) from %s\n", len(allows), allowPath)
 	}
-	fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n  audit    %s\n", c.timeout, auditPath)
+	if !c.observe {
+		fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n", c.timeout)
+	}
+	fmt.Fprintf(&b, "  audit    %s\n", auditPath)
 	p.summary = b.String()
 	return p, nil
 }
@@ -143,6 +156,15 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 // and/or phone), shared by the HTTPS proxy and the Postgres guard.
 func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log.Logger) (*approval.Broker, []string, error) {
 	broker := approval.NewBroker(c.timeout)
+	if c.observe {
+		out := c.logTo
+		if out == nil {
+			out = os.Stdout
+		}
+		broker.SetObserve(true)
+		broker.AddNotifier(approval.NewObserveLog(out))
+		return broker, []string{observeChannel}, nil
+	}
 	var channels []string
 	if c.terminal {
 		term := approval.NewTerminal(broker, os.Stdout)
@@ -170,6 +192,10 @@ func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log
 	if len(channels) == 0 {
 		return nil, nil, errors.New("no approval channel: use the terminal or a phone (--phone, see `twokey phone`)")
 	}
+	if !c.noDesktop {
+		// Only a heads-up: approving still needs the terminal or the phone.
+		broker.AddNotifier(approval.NewDesktop(logger.Printf))
+	}
 	return broker, channels, nil
 }
 
@@ -181,6 +207,8 @@ func phoneTopic(dir string, rotate bool) (string, error) {
 	if !rotate {
 		if data, err := os.ReadFile(path); err == nil {
 			if t := strings.TrimSpace(string(data)); t != "" {
+				// Topics from older versions kept the folder's ACL on Windows.
+				_ = ca.RestrictToUser(path)
 				return t, nil
 			}
 		}
@@ -203,6 +231,10 @@ func phoneTopic(dir string, rotate bool) (string, error) {
 	defer f.Close()
 	if _, err := f.WriteString(topic + "\n"); err != nil {
 		return "", err
+	}
+	// Anyone who can read the topic can approve; Windows ignores 0600.
+	if err := ca.RestrictToUser(path); err != nil {
+		return "", fmt.Errorf("restrict %s: %w", path, err)
 	}
 	return topic, nil
 }

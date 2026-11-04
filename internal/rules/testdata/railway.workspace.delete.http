@@ -1,0 +1,19 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> workspaceDelete(id)
+# resource: ws-1
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation workspaceDelete($id: String!) { workspaceDelete(id: $id) }","variables":{"id":"ws-1"}}
+###
+# safe: reading the workspace
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { workspace(workspaceId: \"ws-1\") { id name } }"}
+###
+# safe: deleting an API token is not a workspace delete
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation { apiTokenDelete(id: \"tok-1\") }"}

@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	certFile     = "ca.pem"
-	keyFile      = "ca-key.pem"
+	certFile       = "ca.pem"
+	keyFile        = "ca-key.pem"
+	caOrganization = "twokey" // Subject O of every twokey root; uninstall relies on it
 	rootValidity = 5 * 365 * 24 * time.Hour
 	leafValidity = 30 * 24 * time.Hour
 )
@@ -120,6 +121,9 @@ func createLocked(dir string, permitted []string) (bool, error) {
 	if err := writeFileAtomic(filepath.Join(dir, keyFile), keyPEM, 0o600); err != nil {
 		return false, err
 	}
+	if err := restrictKeyACL(filepath.Join(dir, keyFile)); err != nil {
+		return false, fmt.Errorf("restrict CA key permissions: %w", err)
+	}
 	if err := writeFileAtomic(filepath.Join(dir, certFile), certPEM, 0o644); err != nil {
 		return false, err
 	}
@@ -147,6 +151,13 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.Chmod(tmp, perm); err != nil {
 		return err
 	}
+	if perm == 0o600 {
+		// Private material: restrict before it gets its final name, so it
+		// never exists at that path with the folder's inherited ACL.
+		if err := restrictKeyACL(tmp); err != nil {
+			return err
+		}
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		if existing, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(existing, data) {
 			return nil
@@ -156,11 +167,24 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// Reset deletes the CA (and the bundle that embeds it) from dir.
+// Reset retires the CA so the next LoadOrCreate makes a new one. Every
+// private key (current and rotated) is deleted; the certificates are kept
+// as ca.old.<n>.pem so `twokey ca untrust` can still remove them from the
+// OS trust store.
 func Reset(dir string) error {
-	for _, f := range []string{certFile, keyFile, bundleFile, lockFile} {
-		if err := os.Remove(filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+	if err := Rotate(dir); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == lockFile || (strings.HasPrefix(name, "ca-key") && strings.HasSuffix(name, ".pem")) {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
 	}
 	return nil
@@ -183,14 +207,21 @@ func (a *Authority) covers(domains []string) error {
 // packs (e.g. after an upgrade added providers); see Rotate.
 var ErrConstraintsOutdated = errors.New("the twokey CA does not cover all rule domains")
 
-// Rotate moves the current CA aside (ca.old.pem / ca-key.old.pem) and drops
-// files derived from it, so the next LoadOrCreate creates a fresh CA.
+// Rotate moves the current CA aside (ca.old.<n>.pem / ca-key.old.<n>.pem)
+// and drops files derived from it, so the next LoadOrCreate creates a fresh
+// CA. Every rotated CA is kept so `twokey ca untrust` can remove it from the
+// OS trust store later.
 func Rotate(dir string) error {
-	for _, f := range []string{certFile, keyFile} {
-		old := filepath.Join(dir, strings.TrimSuffix(f, ".pem")+".old.pem")
-		if err := os.Rename(filepath.Join(dir, f), old); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
+	stamp := fmt.Sprintf(".old.%d.pem", time.Now().UnixNano())
+	oldName := func(f string) string { return filepath.Join(dir, strings.TrimSuffix(f, ".pem")+stamp) }
+	// Key first: it is the file most likely to be locked (Windows). If the
+	// cert then fails to move, put the key back so the CA stays whole.
+	if err := os.Rename(filepath.Join(dir, keyFile), oldName(keyFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(filepath.Join(dir, certFile), oldName(certFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		_ = os.Rename(oldName(keyFile), filepath.Join(dir, keyFile))
+		return err
 	}
 	for _, f := range []string{bundleFile, javaTrustStoreFile} {
 		if err := os.Remove(filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -310,7 +341,7 @@ func generateRoot(permitted []string) (certPEM, keyPEM []byte, err error) {
 	now := time.Now()
 	tpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "twokey local CA (" + hostname + ")", Organization: []string{"twokey"}},
+		Subject:               pkix.Name{CommonName: "twokey local CA (" + hostname + ")", Organization: []string{caOrganization}},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(rootValidity),
 		IsCA:                  true,

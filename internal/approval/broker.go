@@ -60,11 +60,28 @@ func (r Request) ConfirmText() string {
 // defused) in request-derived strings before they are shown to a human.
 func Clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || isLayoutControl(r) {
 			return '?'
 		}
 		return r
 	}, s)
+}
+
+// isLayoutControl reports Unicode characters that reorder or break the
+// displayed text (bidi overrides/isolates, line and paragraph separators),
+// which could make a resource name look like something else.
+func isLayoutControl(r rune) bool {
+	switch {
+	case r == 0x200e, r == 0x200f, r == 0x061c: // LRM, RLM, ALM
+		return true
+	case r >= 0x202a && r <= 0x202e: // embeddings and overrides
+		return true
+	case r >= 0x2066 && r <= 0x2069: // isolates
+		return true
+	case r == 0x2028, r == 0x2029: // line / paragraph separator
+		return true
+	}
+	return false
 }
 
 // NormalizeSpace collapses runs of whitespace to single spaces.
@@ -113,11 +130,29 @@ type Broker struct {
 	mu        sync.Mutex
 	pending   map[string]*entry
 	notifiers []Notifier
+	observe   atomic.Bool
+	grants    *Grants
 }
+
+// GrantObserver is told when a timed approval decided a request.
+type GrantObserver interface {
+	Granted(Request, Decision)
+}
+
+// Grants returns the broker's timed approvals.
+func (b *Broker) Grants() *Grants { return b.grants }
+
+// SetObserve switches observe mode: every request that would be held is
+// approved at once (By "observe") and reported to Observer channels only.
+// It is for trying twokey safely — nothing is protected while it is on.
+func (b *Broker) SetObserve(on bool) { b.observe.Store(on) }
+
+// Observing reports whether observe mode is on.
+func (b *Broker) Observing() bool { return b.observe.Load() }
 
 // NewBroker returns a broker that denies requests nobody answers in timeout.
 func NewBroker(timeout time.Duration) *Broker {
-	return &Broker{timeout: timeout, pending: map[string]*entry{}}
+	return &Broker{timeout: timeout, pending: map[string]*entry{}, grants: NewGrants()}
 }
 
 // AddNotifier registers an approval channel. Call before serving traffic.
@@ -133,6 +168,12 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	req.ID = strconv.FormatUint(b.seq.Add(1), 10)
 	req.Nonce = randomNonce()
 	req.Created = time.Now()
+	if b.observe.Load() {
+		return req, b.observed(req)
+	}
+	if g, ok := b.grants.Match(req); ok {
+		return req, b.granted(req, g)
+	}
 	e := &entry{req: req, ch: make(chan Decision, 1)}
 
 	b.mu.Lock()
@@ -160,6 +201,32 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 		n.Closed(req, d)
 	}
 	return req, d
+}
+
+func (b *Broker) observed(req Request) Decision {
+	b.mu.Lock()
+	notifiers := append([]Notifier(nil), b.notifiers...)
+	b.mu.Unlock()
+	for _, n := range notifiers {
+		if o, ok := n.(Observer); ok {
+			o.Observed(req)
+		}
+	}
+	return Decision{Approved: true, By: "observe", Reason: "observe mode: would have been held, forwarded unprotected"}
+}
+
+func (b *Broker) granted(req Request, g Grant) Decision {
+	d := Decision{Approved: true, By: "grant",
+		Reason: fmt.Sprintf("covered by timed approval #%d (until %s)", g.ID, g.Expires.Format(time.TimeOnly))}
+	b.mu.Lock()
+	notifiers := append([]Notifier(nil), b.notifiers...)
+	b.mu.Unlock()
+	for _, n := range notifiers {
+		if o, ok := n.(GrantObserver); ok {
+			o.Granted(req, d)
+		}
+	}
+	return d
 }
 
 // expire removes e unless a decision raced in, which then wins.

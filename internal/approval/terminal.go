@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Terminal is the approval channel in the `twokey up` window. That window is
@@ -77,7 +79,8 @@ func (t *Terminal) Notify(r Request) {
 		}
 		fmt.Fprintf(&b, "   %-8s %s  operation=%s  resource=%q\n", strings.ToUpper(m.Severity), m.RuleID, Clean(m.Operation), Clean(res))
 		if m.Message != "" {
-			fmt.Fprintf(&b, "            %s\n", m.Message)
+			// For database guards this is the agent's SQL text: defuse it.
+			fmt.Fprintf(&b, "            %s\n", Clean(m.Message))
 		}
 	}
 	if r.Uninspectable != "" {
@@ -132,9 +135,13 @@ func (t *Terminal) Handle(line string) string {
 	switch verb {
 	case "list", "ls":
 		return t.list()
+	case "grants":
+		return t.listGrants()
+	case "revoke":
+		return t.revoke(args)
 	case "approve", "a", "deny", "d":
 	default:
-		return "commands: approve <id> <resource> | deny <id> | list"
+		return "commands: approve <id> <resource> [--for 15m] | deny <id> | list | grants | revoke <n>"
 	}
 
 	req, rest, errMsg := t.target(args)
@@ -145,12 +152,72 @@ func (t *Terminal) Handle(line string) string {
 		t.broker.Resolve(req.ID, Decision{Approved: false, By: "terminal", Reason: "denied by human"})
 		return ""
 	}
+	rest, grantFor, errMsg := splitFor(rest)
+	if errMsg != "" {
+		return errMsg
+	}
 	want := req.ConfirmText()
 	if NormalizeSpace(strings.Join(rest, " ")) != want {
 		return fmt.Sprintf("not approved: type the resource name exactly → approve %s %s", req.ID, want)
 	}
-	t.broker.Resolve(req.ID, Decision{Approved: true, By: "terminal", Reason: "approved with typed confirmation"})
+	reason := "approved with typed confirmation"
+	if grantFor > 0 {
+		if err := t.broker.Grants().Check(req, grantFor); err != nil {
+			return "not approved: " + err.Error()
+		}
+		reason += fmt.Sprintf("; the identical operation is pre-approved for %s", grantFor)
+	}
+	if !t.broker.Resolve(req.ID, Decision{Approved: true, By: "terminal", Reason: reason}) {
+		return fmt.Sprintf("#%s was already decided or timed out; nothing approved or granted", req.ID)
+	}
+	if grantFor > 0 {
+		added, err := t.broker.Grants().AddFor(req, grantFor)
+		if err != nil {
+			return "approved once, but not granted: " + err.Error()
+		}
+		return fmt.Sprintf("granted for %s (#%d): exact repeats are auto-approved (see `grants`, `revoke <id>`)", grantFor, added[0].ID)
+	}
 	return ""
+}
+
+// splitFor removes a trailing "--for <duration>" from an approve command.
+func splitFor(args []string) ([]string, time.Duration, string) {
+	if len(args) < 2 || args[len(args)-2] != "--for" {
+		return args, 0, ""
+	}
+	d, err := time.ParseDuration(args[len(args)-1])
+	if err != nil || d <= 0 || d > MaxGrant {
+		return nil, 0, fmt.Sprintf("--for takes a duration of at most %s, e.g. --for 15m", MaxGrant)
+	}
+	return args[:len(args)-2], d, ""
+}
+
+func (t *Terminal) listGrants() string {
+	gs := t.broker.Grants().List()
+	if len(gs) == 0 {
+		return "no timed approvals"
+	}
+	var b strings.Builder
+	for _, g := range gs {
+		fmt.Fprintf(&b, "#%d  %s on %q at %s until %s\n   ", g.ID, g.RuleID, Clean(g.Resource), Clean(g.URL), g.Expires.Format(time.TimeOnly))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (t *Terminal) revoke(args []string) string {
+	if len(args) != 1 || !isNumber(strings.TrimPrefix(args[0], "#")) {
+		return "usage: revoke <id> (see `grants`)"
+	}
+	id, _ := strconv.Atoi(strings.TrimPrefix(args[0], "#"))
+	if !t.broker.Grants().Revoke(id) {
+		return "no such grant (it may have expired)"
+	}
+	return "revoked"
+}
+
+// Granted prints a request decided by a timed approval.
+func (t *Terminal) Granted(r Request, _ Decision) {
+	t.printf("\n✓  #%s auto-approved by a timed approval: %s\n", r.ID, r.Summary())
 }
 
 // target picks the request an approve/deny refers to.

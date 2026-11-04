@@ -1,0 +1,18 @@
+# source: https://api-docs.planetscale.com/reference/delete_database
+# resource: acme/prod-db
+DELETE https://api.planetscale.com/v1/organizations/acme/databases/prod-db
+Authorization: $PLANETSCALE_SERVICE_TOKEN_ID:$PLANETSCALE_SERVICE_TOKEN
+Accept: application/json
+
+###
+# safe: reading the same database
+GET https://api.planetscale.com/v1/organizations/acme/databases/prod-db
+Authorization: $PLANETSCALE_SERVICE_TOKEN_ID:$PLANETSCALE_SERVICE_TOKEN
+
+###
+# safe: creating a database
+POST https://api.planetscale.com/v1/organizations/acme/databases
+Authorization: $PLANETSCALE_SERVICE_TOKEN_ID:$PLANETSCALE_SERVICE_TOKEN
+Content-Type: application/json
+
+{"name":"new-db"}

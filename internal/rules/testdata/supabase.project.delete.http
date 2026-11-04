@@ -1,0 +1,17 @@
+# source: https://supabase.com/docs/reference/api/v1-delete-a-project
+# resource: abcdefghijklmnopqrst
+DELETE https://api.supabase.com/v1/projects/abcdefghijklmnopqrst
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+
+###
+# safe: reading the same project
+GET https://api.supabase.com/v1/projects/abcdefghijklmnopqrst
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+
+###
+# safe: creating a project
+POST https://api.supabase.com/v1/projects
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+Content-Type: application/json
+
+{"name":"new-project","organization_id":"org-slug","region":"us-east-1","db_pass":"$DB_PASS"}

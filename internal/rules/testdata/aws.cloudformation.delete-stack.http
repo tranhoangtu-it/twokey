@@ -1,0 +1,18 @@
+# source: https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_DeleteStack.html
+# resource: MyStack
+POST https://cloudformation.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DeleteStack&StackName=MyStack&Version=2010-05-15
+###
+# safe: reading the same stack
+POST https://cloudformation.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DescribeStacks&StackName=MyStack&Version=2010-05-15
+###
+# safe: deleting a change set leaves the stack and its resources untouched
+POST https://cloudformation.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DeleteChangeSet&StackName=MyStack&ChangeSetName=pending-change&Version=2010-05-15

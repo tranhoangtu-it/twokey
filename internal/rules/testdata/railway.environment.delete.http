@@ -1,0 +1,20 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> environmentDelete(id: String!)
+# resource: env-staging-1
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+Authorization: Bearer TOKEN
+
+{"query":"mutation environmentDelete($id: String!) { environmentDelete(id: $id) }","variables":{"id":"env-staging-1"}}
+###
+# safe: reading the same environment
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { environment(id: \"env-staging-1\") { id name } }"}
+###
+# safe: creating an environment
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation environmentCreate($input: EnvironmentCreateInput!) { environmentCreate(input: $input) { id } }","variables":{"input":{"projectId":"proj-9d2","name":"preview"}}}

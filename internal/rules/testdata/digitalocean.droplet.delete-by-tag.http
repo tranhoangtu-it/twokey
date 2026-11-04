@@ -1,0 +1,13 @@
+# source: https://docs.digitalocean.com/reference/api/digitalocean/#tag/Droplets/operation/droplets_destroy_byTag
+# resource: tag:staging
+DELETE https://api.digitalocean.com/v2/droplets?tag_name=staging
+Authorization: Bearer $TOKEN
+###
+# safe: listing droplets by the same tag
+GET https://api.digitalocean.com/v2/droplets?tag_name=staging
+###
+# safe: creating a droplet
+POST https://api.digitalocean.com/v2/droplets
+Content-Type: application/json
+
+{"name":"web-1","region":"nyc3","size":"s-1vcpu-1gb","image":"ubuntu-24-04-x64"}

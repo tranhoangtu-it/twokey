@@ -47,21 +47,26 @@ twokey explain --method DELETE --url https://api.github.com/repos/acme/prod-api 
 
 ## Install
 
-Download a binary from [Releases](https://github.com/tranhoangtu-it/twokey/releases)
-(Linux, macOS, Windows; amd64/arm64), or with Go ≥ 1.25:
-
 ```sh
-go install github.com/tranhoangtu-it/twokey/cmd/twokey@latest
+brew install --cask tranhoangtu-it/tap/twokey                                  # macOS / Linux
+scoop bucket add twokey https://github.com/tranhoangtu-it/scoop-bucket && scoop install twokey   # Windows
+go install github.com/tranhoangtu-it/twokey/cmd/twokey@latest                  # Go ≥ 1.25
 ```
+
+or download a binary from [Releases](https://github.com/tranhoangtu-it/twokey/releases)
+(Linux, macOS, Windows; amd64/arm64). The macOS binary is not notarized yet: if Gatekeeper blocks
+it, run `xattr -d com.apple.quarantine "$(which twokey)"`.
 
 ## Use it
 
-**One terminal, approve on your phone** (recommended):
-
 ```sh
-twokey phone                  # once: prints a private ntfy topic to subscribe to in the ntfy app
+twokey setup                  # once: local CA, phone approvals (scan the QR), runtime check
 twokey run --phone -- claude  # or codex, cursor-agent, aider, opencode…
 ```
+
+**Not sure yet? Observe first.** `twokey run --observe -- claude` holds nothing: it prints and
+audits every call it *would* have held, so you can see what twokey catches in your real workflow.
+Observe mode protects nothing — the banner says so.
 
 **Two terminals, approve by typing** (plus the phone, if you want):
 
@@ -80,11 +85,20 @@ A denied request returns `403` with a JSON body written for the model:
 > twokey blocked a destructive request (denied by a human): railway volumeDelete on pg-data-prod.
 > Do not retry, rephrase, or work around this request… ask the user to approve it or run it themselves.
 
-Every hold is appended to `~/.twokey/audit.jsonl`.
+A desktop notification pops up as well (Windows toast, macOS, `notify-send`; `--no-desktop` to
+turn it off) — it only tells you something is waiting; approving still needs the terminal or phone.
+
+**Doing the same cleanup several times?** `approve 3 pr-41-preview --for 15m` also pre-approves
+*the identical operation* — same rule, same resource, same host or database and, for SQL, the same
+statement — for up to an hour (`grants` lists them, `revoke <id>` removes one; they vanish when
+twokey exits). Unknown resources and requests twokey could not read can never be pre-approved.
+
+Every hold is appended to `~/.twokey/audit.jsonl`; read it with `twokey log`
+(`--denied`, `--provider railway`, `--since 24h`, `--json`).
 
 ## What's covered
 
-`twokey rules` lists all 68 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
+`twokey rules` lists all 76 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
 Lambda, EKS, Secrets Manager, ECR, Route 53), Google Cloud (Storage, Cloud SQL, Compute,
 projects), Azure (resource groups and resources), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
 Fly.io, Cloudflare (incl. Pages), DigitalOcean, Heroku, Render, Netlify, PlanetScale, Turso,
@@ -99,8 +113,10 @@ MongoDB Atlas, Hetzner, Linode, Vultr and Upstash. Rules are small YAML files:
   severity: critical
 ```
 
-Load your own with `--rules ./my-rules`. **Adding a provider is the best first PR** — see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Every builtin rule ships a fixture: the destructive request copied from the provider's official
+API reference, plus look-alike requests that must pass — CI fails without one. Load your own rules
+with `--rules ./my-rules` and check them with `twokey rules test --rules ./my-rules`.
+**Adding a provider is the best first PR** — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Pre-approve what's safe in this project
 
@@ -200,8 +216,12 @@ deliberately malicious agent, which runs as your user and could unset `HTTPS_PRO
 `~/.twokey` — use `--strict` for that. Either way: scope your cloud tokens and keep backups
 somewhere a single API call can't reach. See [SECURITY.md](SECURITY.md).
 
-Upgrading: when a release adds providers, twokey creates a new local CA (the old one is kept as
-`~/.twokey/ca.old.pem`). If you used `twokey ca trust`, run it again.
+Upgrading: when a release adds providers, twokey creates a new local CA (old ones are kept as
+`~/.twokey/ca.old.*.pem`). If you used `twokey ca trust`, run it again.
+
+Uninstalling: `twokey uninstall` removes every twokey CA from the OS trust store (by exact
+thumbprint) and any strict-mode Docker objects; add `--purge` to delete `~/.twokey` too.
+`twokey ca untrust` does only the trust-store part.
 
 ## Roadmap
 

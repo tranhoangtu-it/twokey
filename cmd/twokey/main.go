@@ -49,17 +49,22 @@ const usage = `twokey VERSION — make your AI agent ask a human before it delet
 
 Usage:
   twokey replay pocketos                               see what twokey does, in 5 seconds
-  twokey up [--phone] [--timeout 2m]                   start the proxy + approval prompt
+  twokey setup [--yes] [--trust]                       one-time setup: CA, phone, runtime check
+  twokey up [--phone] [--timeout 2m] [--observe]       start the proxy + approval prompt
   twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
+  twokey run --observe -- <agent> [args...]            trial: log what would be held, hold nothing
   twokey phone [--rotate]                              set up approvals on your phone (ntfy)
   twokey pg --upstream HOST:5432 [--upstream-tls]      guard a Postgres database (DROP, TRUNCATE, …)
   twokey mysql --upstream HOST:3306                    guard a MySQL database
-  twokey env [--shell sh|powershell]                   print the variables 'run' sets
+  twokey log [-n 20] [--denied] [--provider P] [--since 24h] [--json]  what was held and decided
+  twokey env [--shell sh|powershell]                 print the variables 'run' sets
   twokey doctor [--addr A]                             check curl/python/node/go are covered
   twokey replay <scenario> [--live]                    replay a real-world incident
   twokey explain --method M --url U [-H k:v] [--data D] would this request be held?
   twokey rules [--rules DIR]                           list destructive-operation rules
-  twokey ca init|path|trust|reset                      manage the local CA
+  twokey rules test --rules DIR [--fixtures DIR]       check your rules against .http fixtures
+  twokey ca init|path|trust|untrust|reset              manage the local CA
+  twokey uninstall [--purge]                           remove OS trust + Docker objects (and ~/.twokey)
   twokey version
 
 Typical use:
@@ -114,6 +119,12 @@ func dispatch(args []string) error {
 		return cmdRules(rest)
 	case "ca":
 		return cmdCA(rest)
+	case "uninstall":
+		return cmdUninstall(rest)
+	case "log":
+		return cmdLog(rest)
+	case "setup":
+		return cmdSetup(rest)
 	case "mysql":
 		return cmdMySQL(rest)
 	case "pg":
@@ -164,8 +175,14 @@ func loadAuthority(engine *rules.Engine) (*ca.Authority, bool, error) {
 			return nil, false, fmt.Errorf("%v (and rotating it failed: %w)", err, rerr)
 		}
 		fmt.Fprintln(os.Stderr, "twokey: rule packs now cover more domains, so a new local CA was created "+
-			"(old one kept as ca.old.pem). If you used `twokey ca trust`, run it again.")
+			"(the old one is kept so `twokey ca untrust` can remove it). If you used `twokey ca trust`, run it again.")
 		return ca.LoadOrCreate(home, engine.Domains()...)
+	}
+	if err == nil && !created {
+		// CAs made before v0.5 on Windows inherit the folder ACL; tighten it.
+		if herr := ca.HardenKey(home); herr != nil {
+			fmt.Fprintln(os.Stderr, "twokey: warning: could not restrict CA key permissions:", herr)
+		}
 	}
 	return a, created, err
 }
@@ -189,6 +206,9 @@ func loadEngine(dir string) (*rules.Engine, error) {
 // ---- rules / explain / replay ------------------------------------------------
 
 func cmdRules(args []string) error {
+	if len(args) > 0 && args[0] == "test" {
+		return cmdRulesTest(args[1:])
+	}
 	fs := flag.NewFlagSet("rules", flag.ContinueOnError)
 	dir := fs.String("rules", "", "extra rule pack directory")
 	if err := fs.Parse(args); err != nil {
@@ -298,7 +318,10 @@ func explain(w io.Writer, engine *rules.Engine, method, rawURL string, h http.He
 
 func cmdCA(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: twokey ca init|path|trust|reset")
+		return errors.New("usage: twokey ca init|path|trust|untrust|reset")
+	}
+	if args[0] == "untrust" {
+		return cmdCAUntrust()
 	}
 	if args[0] == "path" {
 		// Report only; never create a CA (key material) as a side effect.
@@ -321,9 +344,9 @@ func cmdCA(args []string) error {
 		if err := ca.Reset(home); err != nil {
 			return err
 		}
-		fmt.Println("CA removed from", home, "— a new one is created on the next `twokey up`.")
+		fmt.Println("CA retired in", home, "— every private key is deleted; a new CA is created on the next `twokey up`.")
 		if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-			fmt.Println("If you ran `twokey ca trust`, remove the old \"twokey local CA\" from your OS trust store and trust the new one.")
+			fmt.Println("If you ran `twokey ca trust`: `twokey ca untrust` removes the old CA (its certificate was kept for that), then trust the new one.")
 		}
 		return nil
 	}

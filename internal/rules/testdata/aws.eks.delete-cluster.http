@@ -1,0 +1,12 @@
+# source: https://docs.aws.amazon.com/eks/latest/APIReference/API_DeleteCluster.html
+# resource: prod
+DELETE https://eks.us-east-1.amazonaws.com/clusters/prod
+###
+# safe: reading the same cluster
+GET https://eks.us-east-1.amazonaws.com/clusters/prod
+###
+# safe: creating a cluster
+POST https://eks.us-east-1.amazonaws.com/clusters
+Content-Type: application/json
+
+{"name": "staging", "roleArn": "arn:aws:iam::111122223333:role/eks-cluster", "resourcesVpcConfig": {"subnetIds": ["subnet-0abc"]}}

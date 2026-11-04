@@ -1,0 +1,20 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> serviceDelete(id: String!, environmentId: String)
+# resource: svc-api-1
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+Authorization: Bearer TOKEN
+
+{"query":"mutation serviceDelete($id: String!) { serviceDelete(id: $id) }","variables":{"id":"svc-api-1"}}
+###
+# safe: reading the same service
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { service(id: \"svc-api-1\") { id name } }"}
+###
+# safe: creating a service
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation serviceCreate($input: ServiceCreateInput!) { serviceCreate(input: $input) { id } }","variables":{"input":{"projectId":"proj-9d2","name":"worker"}}}

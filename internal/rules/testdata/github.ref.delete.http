@@ -1,0 +1,18 @@
+# source: https://docs.github.com/en/rest/git/refs#delete-a-reference
+# resource: acme/prod-api:heads/feature-a
+DELETE https://api.github.com/repos/acme/prod-api/git/refs/heads/feature-a
+Accept: application/vnd.github+json
+X-GitHub-Api-Version: 2022-11-28
+
+###
+# safe: reading the same reference
+GET https://api.github.com/repos/acme/prod-api/git/ref/heads/feature-a
+Accept: application/vnd.github+json
+
+###
+# safe: creating a reference
+POST https://api.github.com/repos/acme/prod-api/git/refs
+Accept: application/vnd.github+json
+Content-Type: application/json
+
+{"ref":"refs/heads/feature-b","sha":"aa218f56b14c9653891f9e74264a383fa43fefbd"}

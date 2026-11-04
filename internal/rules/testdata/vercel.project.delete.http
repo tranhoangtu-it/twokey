@@ -1,0 +1,17 @@
+# source: https://vercel.com/docs/rest-api/reference/endpoints/projects/delete-a-project
+# resource: prj_12HKQaOmR5t5Uy6vdcQsNIiZgHGB
+DELETE https://api.vercel.com/v9/projects/prj_12HKQaOmR5t5Uy6vdcQsNIiZgHGB?teamId=team_1a2b3c4d5e6f7g8h9i0j1k2l
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same project
+GET https://api.vercel.com/v9/projects/prj_12HKQaOmR5t5Uy6vdcQsNIiZgHGB
+Authorization: Bearer TOKEN
+
+###
+# safe: updating the project
+PATCH https://api.vercel.com/v9/projects/prj_12HKQaOmR5t5Uy6vdcQsNIiZgHGB
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"renamed-project"}

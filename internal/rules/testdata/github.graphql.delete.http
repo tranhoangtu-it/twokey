@@ -1,0 +1,19 @@
+# source: https://docs.github.com/en/graphql/reference/mutations#deleteref
+# resource: REF_kwDOAbc123
+POST https://api.github.com/graphql
+Content-Type: application/json
+Authorization: bearer TOKEN
+
+{"query":"mutation DeleteBranch($input: DeleteRefInput!) { deleteRef(input: $input) { clientMutationId } }","variables":{"input":{"refId":"REF_kwDOAbc123"}}}
+###
+# safe: a GraphQL query reading the same ref
+POST https://api.github.com/graphql
+Content-Type: application/json
+
+{"query":"query { repository(owner: \"acme\", name: \"prod-api\") { ref(qualifiedName: \"refs/heads/feature-a\") { id name } } }"}
+###
+# safe: a non-delete mutation
+POST https://api.github.com/graphql
+Content-Type: application/json
+
+{"query":"mutation($input: CreateIssueInput!) { createIssue(input: $input) { issue { id } } }","variables":{"input":{"repositoryId":"R_kgDOAbc","title":"x"}}}

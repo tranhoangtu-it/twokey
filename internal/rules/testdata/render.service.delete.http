@@ -1,0 +1,18 @@
+# source: https://api-docs.render.com/reference/delete-service
+# resource: srv-cph1a2b3c4d5e6f7g8h9
+DELETE https://api.render.com/v1/services/srv-cph1a2b3c4d5e6f7g8h9
+Accept: application/json
+Authorization: Bearer $RENDER_API_KEY
+
+###
+# safe: reading the same service
+GET https://api.render.com/v1/services/srv-cph1a2b3c4d5e6f7g8h9
+Authorization: Bearer $RENDER_API_KEY
+
+###
+# safe: triggering a deploy
+POST https://api.render.com/v1/services/srv-cph1a2b3c4d5e6f7g8h9/deploys
+Content-Type: application/json
+Authorization: Bearer $RENDER_API_KEY
+
+{"clearCache":"do_not_clear"}

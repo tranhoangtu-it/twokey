@@ -27,8 +27,19 @@ go run ./cmd/twokey explain --method DELETE --url https://api.vercel.com/v9/proj
 echo $?   # 2 = would be held
 ```
 
-4. Add a case to `TestEvaluate` in `internal/rules/engine_test.go` (one held request, and one
-   similar request that must **not** be held), then `go test ./...`.
+4. Add a fixture `internal/rules/testdata/<rule-id>.http` — CI fails without one. Copy the
+   request from the provider's **official API reference** and cite it:
+
+   ```http
+   # source: https://vercel.com/docs/rest-api/reference/endpoints/projects/remove-an-environment-variable
+   # resource: my-app/env_123
+   DELETE https://api.vercel.com/v9/projects/my-app/env/env_123
+   ###
+   # safe: reading it must not be held
+   GET https://api.vercel.com/v9/projects/my-app/env/env_123
+   ```
+
+   Then `go test ./...`. For your own packs: `twokey rules test --rules ./my-packs`.
 5. In the PR, link the provider's official API reference for the endpoint.
 
 Rules must match what the provider's **official CLI and SDKs actually send** (host, API version,

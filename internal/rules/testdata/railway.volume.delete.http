@@ -1,0 +1,20 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> volumeDelete(volumeId: String!)
+# resource: 3f6c1b2a-volume
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+Authorization: Bearer TOKEN
+
+{"query":"mutation volumeDelete($volumeId: String!) { volumeDelete(volumeId: $volumeId) }","variables":{"volumeId":"3f6c1b2a-volume"}}
+###
+# safe: listing the project's volumes
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { project(id: \"p1\") { volumes { edges { node { id name } } } } }"}
+###
+# safe: a non-delete mutation
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation volumeCreate($input: VolumeCreateInput!) { volumeCreate(input: $input) { id } }","variables":{"input":{"projectId":"p1","serviceId":"s1","mountPath":"/data"}}}

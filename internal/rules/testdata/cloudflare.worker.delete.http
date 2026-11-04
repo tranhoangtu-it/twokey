@@ -1,0 +1,14 @@
+# source: https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/delete/
+# resource: this-is_my_script-01
+DELETE https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/workers/scripts/this-is_my_script-01
+Authorization: Bearer TOKEN
+
+###
+# safe: downloading the same script
+GET https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/workers/scripts/this-is_my_script-01
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the script's settings
+GET https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/workers/scripts/this-is_my_script-01/settings
+Authorization: Bearer TOKEN

@@ -1,0 +1,15 @@
+# source: https://www.mongodb.com/docs/api/doc/atlas-admin-api-v2/2024-11-13/operation/operation-deletegroupflexcluster
+# resource: 32b6e34b3d91647abb20e7b8/prod-flex
+DELETE https://cloud.mongodb.com/api/atlas/v2/groups/32b6e34b3d91647abb20e7b8/flexClusters/prod-flex
+Authorization: Bearer $ATLAS_ACCESS_TOKEN
+Accept: application/vnd.atlas.2024-11-13+json
+
+###
+# safe: reading the same flex cluster
+GET https://cloud.mongodb.com/api/atlas/v2/groups/32b6e34b3d91647abb20e7b8/flexClusters/prod-flex
+Accept: application/vnd.atlas.2024-11-13+json
+
+###
+# safe: listing flex clusters in the project
+GET https://cloud.mongodb.com/api/atlas/v2/groups/32b6e34b3d91647abb20e7b8/flexClusters
+Accept: application/vnd.atlas.2024-11-13+json

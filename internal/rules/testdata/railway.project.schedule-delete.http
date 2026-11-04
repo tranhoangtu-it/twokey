@@ -1,0 +1,19 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> projectScheduleDelete(id), projectScheduleDeleteForce(id)
+# resource: proj-9d2
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation projectScheduleDeleteForce($id: String!) { projectScheduleDeleteForce(id: $id) }","variables":{"id":"proj-9d2"}}
+###
+# safe: cancelling a scheduled delete
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation { projectScheduleDeleteCancel(id: \"proj-9d2\") }"}
+###
+# safe: reading the project
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query { project(id: \"proj-9d2\") { id name } }"}

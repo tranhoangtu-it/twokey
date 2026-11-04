@@ -27,4 +27,10 @@ not in public issues. Expect a first response within a few days.
   `ca-key.pem` cannot be used to impersonate other sites.
 - The phone-approval topic is stored in `~/.twokey/ntfy-topic` (mode 0600), never on the
   command line, and `TWOKEY_NTFY_*` variables are stripped from the agent's environment.
-- On Windows, file modes are not enforced; `~/.twokey` relies on your user profile's ACL.
+- `ca-key.pem` is mode 0600 on Unix; on Windows it gets a protected ACL with a single entry for
+  your user (no SYSTEM/Administrators, inherited or explicit), and older keys are tightened on the
+  next run. This keeps the key from *other* accounts; an agent running as you can still read it,
+  which is why the CA is name-constrained and `--strict` mounts only the public certificate.
+- `twokey uninstall` removes every CA twokey ever created (current and rotated) from the OS
+  trust store **by exact SHA-1 thumbprint** — never by name — plus strict-mode Docker objects;
+  `--purge` also deletes `~/.twokey`.

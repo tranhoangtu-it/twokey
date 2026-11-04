@@ -36,6 +36,13 @@ rules:
     resource: "{project}/{zone}/{disk}"
     severity: critical
     message: Deletes a persistent disk and its data.
+  - id: gcp.compute.delete-regional-disk
+    hosts: [compute.googleapis.com]
+    methods: [DELETE]
+    path: /compute/{version}/projects/{project}/regions/{region}/disks/{disk}
+    resource: "{project}/{region}/{disk}"
+    severity: critical
+    message: Deletes a regional (replicated) persistent disk and its data.
   - id: gcp.project.delete
     hosts: [cloudresourcemanager.googleapis.com]
     methods: [DELETE]

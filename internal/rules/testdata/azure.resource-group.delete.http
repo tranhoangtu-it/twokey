@@ -1,0 +1,12 @@
+# source: https://learn.microsoft.com/en-us/rest/api/resources/resource-groups/delete
+# resource: prod-rg
+DELETE https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/prod-rg?api-version=2021-04-01
+###
+# safe: reading the same resource group
+GET https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/prod-rg?api-version=2021-04-01
+###
+# safe: creating or updating the resource group
+PUT https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/prod-rg?api-version=2021-04-01
+Content-Type: application/json
+
+{"location": "eastus"}

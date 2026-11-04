@@ -1,0 +1,17 @@
+# source: https://docs.hetzner.cloud/reference/cloud#servers-delete-a-server
+# resource: 42
+DELETE https://api.hetzner.cloud/v1/servers/42
+Authorization: Bearer $HCLOUD_TOKEN
+
+###
+# safe: reading the same server
+GET https://api.hetzner.cloud/v1/servers/42
+Authorization: Bearer $HCLOUD_TOKEN
+
+###
+# safe: renaming the server
+PUT https://api.hetzner.cloud/v1/servers/42
+Authorization: Bearer $HCLOUD_TOKEN
+Content-Type: application/json
+
+{"name":"my-server"}

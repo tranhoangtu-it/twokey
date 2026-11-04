@@ -55,12 +55,13 @@ rules:
     hosts: ["*.s3.amazonaws.com", "*.s3.*.amazonaws.com", "*.s3-*.amazonaws.com"]
     methods: [DELETE]
     path: /
-    unless_query: &s3subresources [policy, lifecycle, cors, website, tagging, encryption, replication, ownershipControls, publicAccessBlock, analytics, metrics, inventory, intelligent-tiering, metadataTable]
+    unless_query: &s3subresources [policy, lifecycle, cors, website, tagging, encryption, replication, ownershipControls, publicAccessBlock, analytics, metrics, inventory, intelligent-tiering, metadataTable, metadataConfiguration]
     resource: "{host}"
     severity: critical
     message: Deletes an S3 bucket (virtual-hosted style).
   - id: aws.s3.delete-bucket-path-style
-    hosts: [s3.amazonaws.com, "s3.*.amazonaws.com", "s3-*.amazonaws.com"]
+    # s3express-control.<region> is the path-style-only endpoint for directory buckets.
+    hosts: [s3.amazonaws.com, "s3.*.amazonaws.com", "s3-*.amazonaws.com", "s3express-control.*.amazonaws.com"]
     methods: [DELETE]
     path: /{bucket}
     unless_query: *s3subresources

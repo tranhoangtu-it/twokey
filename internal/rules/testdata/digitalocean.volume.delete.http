@@ -1,0 +1,18 @@
+# source: https://docs.digitalocean.com/reference/api/reference/block-storage/#volumes_delete
+# resource: 7724db7c-e098-11e5-b522-000f53304e51
+DELETE https://api.digitalocean.com/v2/volumes/7724db7c-e098-11e5-b522-000f53304e51
+Content-Type: application/json
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: reading the same volume
+GET https://api.digitalocean.com/v2/volumes/7724db7c-e098-11e5-b522-000f53304e51
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: creating a volume
+POST https://api.digitalocean.com/v2/volumes
+Content-Type: application/json
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+{"size_gigabytes":10,"name":"example","region":"nyc1","filesystem_type":"ext4"}

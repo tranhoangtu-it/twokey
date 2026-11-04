@@ -1,0 +1,17 @@
+# source: https://docs.fly.io/machines/api/apps-resource
+# resource: my-app-name
+DELETE https://api.machines.dev/v1/apps/my-app-name
+Authorization: Bearer $FLY_API_TOKEN
+
+###
+# safe: reading the same app
+GET https://api.machines.dev/v1/apps/my-app-name
+Authorization: Bearer $FLY_API_TOKEN
+
+###
+# safe: creating an app
+POST https://api.machines.dev/v1/apps
+Authorization: Bearer $FLY_API_TOKEN
+Content-Type: application/json
+
+{"app_name":"my-app-name","org_slug":"personal"}

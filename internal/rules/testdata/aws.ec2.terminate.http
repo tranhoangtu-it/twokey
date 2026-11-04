@@ -1,0 +1,18 @@
+# source: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TerminateInstances.html
+# resource: i-1234567890abcdef0
+POST https://ec2.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=TerminateInstances&InstanceId.1=i-1234567890abcdef0&Version=2016-11-15
+###
+# safe: reading the same instance
+POST https://ec2.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DescribeInstances&InstanceId.1=i-1234567890abcdef0&Version=2016-11-15
+###
+# safe: stopping (not terminating) the same instance
+POST https://ec2.us-east-1.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=StopInstances&InstanceId.1=i-1234567890abcdef0&Version=2016-11-15

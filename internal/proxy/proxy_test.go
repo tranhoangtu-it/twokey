@@ -231,6 +231,50 @@ func TestDeniedDestructiveRequestNeverReachesUpstream(t *testing.T) {
 	}
 }
 
+func TestPlainHTTPDestructiveRequestIsHeld(t *testing.T) {
+	h := newHarness(t)
+	target := "http://" + h.upstream.Listener.Addr().String() + "/repos/acme/api"
+	req, _ := http.NewRequest("DELETE", target, nil)
+	resp, err := h.client("").Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("X-Twokey") != "blocked" {
+		t.Fatalf("want 403 blocked, got %d %v", resp.StatusCode, resp.Header)
+	}
+	if h.decider.holds.Load() != 1 || h.upstreamHits.Load() != 0 {
+		t.Fatalf("holds=%d upstreamHits=%d", h.decider.holds.Load(), h.upstreamHits.Load())
+	}
+}
+
+func TestObserveModeForwardsWithoutHolding(t *testing.T) {
+	h := newHarness(t)
+	h.broker.SetObserve(true)
+	resp, body := h.do(t, "DELETE", "/repos/acme/api", "")
+	if resp.StatusCode != 200 || body != "upstream says hi" || h.upstreamHits.Load() != 1 {
+		t.Fatalf("got %d %q hits=%d", resp.StatusCode, body, h.upstreamHits.Load())
+	}
+	if h.decider.holds.Load() != 0 {
+		t.Fatal("observe mode must not prompt a human")
+	}
+}
+
+func TestTimedGrantForwardsOnlyTheGrantedResource(t *testing.T) {
+	h := newHarness(t)
+	grant := approval.Request{Method: "DELETE", URL: "https://127.0.0.1/repos/acme/api",
+		Matches: []rules.Match{{RuleID: "test.repo.delete", Resource: "acme/api"}}}
+	if _, err := h.broker.Grants().AddFor(grant, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := h.do(t, "DELETE", "/repos/acme/api", ""); resp.StatusCode != 200 || h.decider.holds.Load() != 0 {
+		t.Fatalf("granted request: %d holds=%d", resp.StatusCode, h.decider.holds.Load())
+	}
+	if resp, _ := h.do(t, "DELETE", "/repos/acme/other", ""); resp.StatusCode != http.StatusForbidden || h.decider.holds.Load() != 1 {
+		t.Fatalf("ungranted resource must still be held: %d holds=%d", resp.StatusCode, h.decider.holds.Load())
+	}
+}
+
 func TestApprovedDestructiveRequestIsForwarded(t *testing.T) {
 	h := newHarness(t)
 	h.decider.approve.Store(true)
