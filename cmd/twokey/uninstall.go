@@ -37,9 +37,8 @@ func execRun(name string, args ...string) ([]byte, error) {
 var thumbprintRE = regexp.MustCompile(`^[0-9A-F]{40}$`)
 
 // untrust removes the given CA thumbprints from the OS trust store and
-// reports how many were removed. Only exact SHA-1 thumbprints are accepted:
-// `certutil -delstore` would read a numeric id as a store *index*, so on
-// Windows the Cert: provider path (exact thumbprint) is used instead.
+// reports how many were removed (verified against the store). Only exact
+// SHA-1 thumbprints are accepted.
 func (u uninstaller) untrust(thumbprints []string) (int, error) {
 	for _, tp := range thumbprints {
 		if !thumbprintRE.MatchString(tp) {
@@ -70,12 +69,7 @@ func (u uninstaller) untrust(thumbprints []string) (int, error) {
 
 func (u uninstaller) untrustOne(tp string) (bool, error) {
 	if u.goos == "windows" {
-		script := fmt.Sprintf(`$p='Cert:\CurrentUser\Root\%s'; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -ErrorAction Stop; 'removed' } else { 'absent' }`, tp)
-		out, err := u.run("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-		if err != nil {
-			return false, fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
-		}
-		return strings.Contains(string(out), "removed"), nil
+		return u.untrustWindows(tp)
 	}
 	home, _ := os.UserHomeDir()
 	keychain := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
@@ -91,6 +85,56 @@ func (u uninstaller) untrustOne(tp string) (bool, error) {
 		return false, fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return true, nil
+}
+
+// untrustWindows removes one certificate from the user Root store and then
+// checks the store itself: the result reported is what is really left, not
+// what a command printed.
+//
+// Only certutil is used. PowerShell is unreliable here: Windows PowerShell
+// started from another process inherits PowerShell 7's PSModulePath, loses
+// the Cert: drive and answers "not found" for everything; and Remove-Item
+// on the user Root store fails when UI is not allowed. certutil reads an
+// all-digit id as a store *index*, so such thumbprints are refused first.
+func (u uninstaller) untrustWindows(tp string) (bool, error) {
+	if !strings.ContainsAny(tp, "ABCDEF") {
+		return false, errors.New("thumbprint has no letters, which certutil would read as a store index; remove it in certmgr.msc")
+	}
+	present, err := u.inWindowsRoot(tp)
+	if err != nil || !present {
+		return false, err
+	}
+	out, delErr := u.run("certutil", "-user", "-delstore", "Root", tp)
+	if present, err = u.inWindowsRoot(tp); err != nil {
+		return false, err
+	}
+	if present {
+		return false, fmt.Errorf("still trusted after certutil (%v): %s", delErr, strings.TrimSpace(string(out)))
+	}
+	return true, nil
+}
+
+// Exit statuses certutil uses for "no such certificate" (NTE_NOT_FOUND,
+// CRYPT_E_NOT_FOUND). Exit codes, unlike messages, are not localized.
+const (
+	nteNotFound    = 0x80090011
+	cryptENotFound = 0x80092004
+)
+
+// inWindowsRoot reports whether the user Root store holds tp. Any failure
+// other than "not found" is an error, never a silent "absent".
+func (u uninstaller) inWindowsRoot(tp string) (bool, error) {
+	out, err := u.run("certutil", "-user", "-store", "Root", tp)
+	if err == nil {
+		return true, nil
+	}
+	var ec interface{ ExitCode() int }
+	if errors.As(err, &ec) {
+		if code := uint32(ec.ExitCode()); code == nteNotFound || code == cryptENotFound {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("read the user Root store: %v: %s", err, strings.TrimSpace(string(out)))
 }
 
 // removeDocker deletes strict-mode gateway containers and network. Docker

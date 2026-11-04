@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -50,12 +51,25 @@ func NewDesktop(logf func(string, ...any)) *Desktop {
 
 func runCommand(ctx context.Context, argv, env []string) error {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(withoutPSModulePath(os.Environ()), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v: %s", err, out)
 	}
 	return nil
+}
+
+// withoutPSModulePath drops PSModulePath: Windows PowerShell 5.1 started
+// from a PowerShell 7 session would inherit 7's module path and fail to
+// load its own modules.
+func withoutPSModulePath(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !strings.HasPrefix(strings.ToUpper(kv), "PSMODULEPATH=") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // Notify shows the held request without blocking the broker.

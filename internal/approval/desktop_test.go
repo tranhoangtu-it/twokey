@@ -78,6 +78,13 @@ func TestDesktopRunsAtMostOneNotificationAtATime(t *testing.T) {
 	}
 }
 
+func TestDesktopDropsPSModulePath(t *testing.T) {
+	got := withoutPSModulePath([]string{"PATH=x", "PSModulePath=C:\\pwsh7\\Modules", "psmodulepath=y", "HOME=h"})
+	if len(got) != 2 || got[0] != "PATH=x" || got[1] != "HOME=h" {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestDesktopIgnoresObserveAndCloses(t *testing.T) {
 	d := NewDesktop(func(string, ...any) {})
 	calls := 0

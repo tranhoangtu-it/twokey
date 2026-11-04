@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -37,18 +39,92 @@ func (f *fakeRunner) run(name string, args ...string) ([]byte, error) {
 
 const tpA = "D2E293BFEC06FDB1A8A0924AB662B1DFCE6EF3A0"
 
-func TestUntrustWindowsUsesExactThumbprintPath(t *testing.T) {
-	f := &fakeRunner{answers: map[string]string{"powershell": "removed"}}
-	u := uninstaller{goos: "windows", run: f.run, out: &bytes.Buffer{}}
+// fakeStore simulates the Windows user Root store: PowerShell Test-Path
+// reports presence, certutil -delstore removes (unless refusing), so the
+// test sees what is really left, not what a command printed.
+type fakeStore struct {
+	present map[string]bool
+	refuse  bool // deletion "succeeds" but nothing is removed
+	calls   []string
+}
+
+var tpInLine = regexp.MustCompile(`[0-9A-F]{40}`)
+
+func (s *fakeStore) run(name string, args ...string) ([]byte, error) {
+	line := strings.Join(append([]string{name}, args...), " ")
+	s.calls = append(s.calls, line)
+	tp := tpInLine.FindString(line)
+	switch {
+	case strings.HasPrefix(line, "certutil -user -store Root "):
+		if s.present[tp] {
+			return []byte("================ Certificate 0 ================"), nil
+		}
+		return []byte("CertUtil: -store command FAILED: 0x80090011 (-2146893807 NTE_NOT_FOUND)"), fakeExit(0x80090011)
+	case strings.HasPrefix(line, "certutil -user -delstore Root "):
+		if !s.refuse {
+			delete(s.present, tp)
+		}
+		return []byte("CertUtil: -delstore command completed successfully."), nil
+	}
+	return nil, errors.New("not available") // e.g. powershell: must not be used
+}
+
+// fakeExit mimics a process exit status (like *exec.ExitError).
+type fakeExit uint32
+
+func (e fakeExit) Error() string { return fmt.Sprintf("exit status %#x", uint32(e)) }
+func (e fakeExit) ExitCode() int { return int(uint32(e)) }
+
+func TestUntrustWindowsDeletesExactThumbprintAndVerifies(t *testing.T) {
+	s := &fakeStore{present: map[string]bool{tpA: true}}
+	u := uninstaller{goos: "windows", run: s.run, out: &bytes.Buffer{}}
 	n, err := u.untrust([]string{tpA})
-	if err != nil || n != 1 {
+	if err != nil || n != 1 || s.present[tpA] {
+		t.Fatalf("n=%d err=%v present=%v", n, err, s.present)
+	}
+	var deleted bool
+	for _, c := range s.calls {
+		if strings.HasPrefix(c, "powershell") {
+			t.Fatal("PowerShell started from Go inherits PSModulePath and loses the Cert: drive")
+		}
+		deleted = deleted || c == "certutil -user -delstore Root "+tpA
+	}
+	if !deleted {
+		t.Fatalf("calls=%v", s.calls)
+	}
+}
+
+func TestUntrustWindowsReportsWhenStillTrusted(t *testing.T) {
+	s := &fakeStore{present: map[string]bool{tpA: true}, refuse: true}
+	u := uninstaller{goos: "windows", run: s.run, out: &bytes.Buffer{}}
+	if n, err := u.untrust([]string{tpA}); err == nil || n != 0 {
+		t.Fatalf("a certificate that is still trusted was reported removed: n=%d err=%v", n, err)
+	}
+}
+
+func TestUntrustWindowsSkipsAbsentCertificates(t *testing.T) {
+	s := &fakeStore{present: map[string]bool{}}
+	u := uninstaller{goos: "windows", run: s.run, out: &bytes.Buffer{}}
+	if n, err := u.untrust([]string{tpA}); err != nil || n != 0 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
-	if len(f.calls) != 1 || !strings.Contains(f.calls[0], `Cert:\CurrentUser\Root\`+tpA) {
-		t.Fatalf("calls=%v", f.calls)
+	for _, c := range s.calls {
+		if strings.Contains(c, "-delstore") {
+			t.Fatal("tried to delete a certificate that is not in the store")
+		}
 	}
-	if strings.Contains(f.calls[0], "certutil") {
-		t.Fatal("certutil -delstore treats numeric ids as indexes; must not be used")
+}
+
+// certutil reads an all-digit id as a store index; never pass one.
+func TestUntrustWindowsRefusesAllDigitThumbprint(t *testing.T) {
+	digits := strings.Repeat("1234567890", 4)
+	s := &fakeStore{present: map[string]bool{digits: true}}
+	u := uninstaller{goos: "windows", run: s.run, out: &bytes.Buffer{}}
+	if _, err := u.untrust([]string{digits}); err == nil {
+		t.Fatal("all-digit thumbprint accepted")
+	}
+	if len(s.calls) != 0 {
+		t.Fatalf("certutil must never see an all-digit id: %v", s.calls)
 	}
 }
 
@@ -91,16 +167,18 @@ func TestUntrustRetiredKeepsTheCurrentCA(t *testing.T) {
 		}
 	}
 	current, _, _ := ca.CurrentThumbprint(home)
-	f := &fakeRunner{answers: map[string]string{"powershell": "removed"}}
-	u := uninstaller{home: home, goos: "windows", run: f.run, out: &bytes.Buffer{}}
+	all, _, _ := ca.Thumbprints(home)
+	s := &fakeStore{present: map[string]bool{}}
+	for _, tp := range all {
+		s.present[tp] = true
+	}
+	u := uninstaller{home: home, goos: "windows", run: s.run, out: &bytes.Buffer{}}
 	n, err := u.untrustRetired()
 	if err != nil || n != 2 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
-	for _, c := range f.calls {
-		if strings.Contains(c, current) {
-			t.Fatalf("removed the current CA: %s", c)
-		}
+	if len(s.present) != 1 || !s.present[current] {
+		t.Fatalf("want only the current CA left trusted, got %v", s.present)
 	}
 }
 
@@ -152,8 +230,9 @@ func TestPurgeDeletesTwokeyHome(t *testing.T) {
 	if _, _, err := ca.LoadOrCreate(home); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeRunner{answers: map[string]string{"powershell": "removed"}, fail: map[string]bool{"docker": true}}
-	u := uninstaller{home: home, goos: "windows", run: f.run, out: &bytes.Buffer{}, purge: true}
+	tp, _, _ := ca.CurrentThumbprint(home)
+	s := &fakeStore{present: map[string]bool{tp: true}}
+	u := uninstaller{home: home, goos: "windows", run: s.run, out: &bytes.Buffer{}, purge: true}
 	if err := u.Run(); err != nil {
 		t.Fatal(err)
 	}
