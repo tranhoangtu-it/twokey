@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,7 +39,8 @@ func loadFS(fsys fs.FS, dir string) ([]Pack, error) {
 		if e.IsDir() || (ext != ".yaml" && ext != ".yml") {
 			continue
 		}
-		data, err := fs.ReadFile(fsys, dir+"/"+e.Name())
+		// path.Join, not dir+"/": "./x.yaml" is an invalid fs.FS path.
+		data, err := fs.ReadFile(fsys, path.Join(dir, e.Name()))
 		if err != nil {
 			return nil, err
 		}

@@ -40,7 +40,11 @@ type proxyConfig struct {
 	terminal   bool      // approvals typed into this process's stdin
 	logTo      io.Writer // where proxy diagnostics go
 	allowFile  string    // pre-approved operations (default: ./.twokey-allow.yaml if present)
+	observe    bool      // log and audit would-be holds but forward everything
 }
+
+// observeChannel is the banner line for observe mode.
+const observeChannel = "OBSERVE MODE — nothing is held; would-be holds are logged and audited as by=observe (NOT PROTECTED)"
 
 // defaultAllowFile is picked up from the current (project) directory.
 const defaultAllowFile = ".twokey-allow.yaml"
@@ -143,6 +147,15 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 // and/or phone), shared by the HTTPS proxy and the Postgres guard.
 func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log.Logger) (*approval.Broker, []string, error) {
 	broker := approval.NewBroker(c.timeout)
+	if c.observe {
+		out := c.logTo
+		if out == nil {
+			out = os.Stdout
+		}
+		broker.SetObserve(true)
+		broker.AddNotifier(approval.NewObserveLog(out))
+		return broker, []string{observeChannel}, nil
+	}
 	var channels []string
 	if c.terminal {
 		term := approval.NewTerminal(broker, os.Stdout)

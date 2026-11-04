@@ -1,0 +1,17 @@
+# source: https://techdocs.akamai.com/linode-api/reference/delete-volume
+# resource: 251
+DELETE https://api.linode.com/v4/volumes/251
+Authorization: Bearer $LINODE_TOKEN
+
+###
+# safe: reading the same volume
+GET https://api.linode.com/v4/volumes/251
+Authorization: Bearer $LINODE_TOKEN
+
+###
+# safe: detaching the volume keeps its data
+POST https://api.linode.com/v4/volumes/251/detach
+Authorization: Bearer $LINODE_TOKEN
+Content-Type: application/json
+
+{}

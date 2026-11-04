@@ -1,0 +1,9 @@
+# source: https://learn.microsoft.com/en-us/rest/api/resources/resources/delete
+# resource: prod-rg/Microsoft.Compute/virtualMachines/web-1
+DELETE https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/prod-rg/providers/Microsoft.Compute/virtualMachines/web-1?api-version=2021-04-01
+###
+# safe: reading the same resource
+GET https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/prod-rg/providers/Microsoft.Compute/virtualMachines/web-1?api-version=2021-04-01
+###
+# safe: an action on the same resource is not a delete
+POST https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/prod-rg/providers/Microsoft.Compute/virtualMachines/web-1/restart?api-version=2024-07-01

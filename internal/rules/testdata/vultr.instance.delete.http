@@ -1,0 +1,17 @@
+# source: https://www.vultr.com/api/#tag/instances/operation/delete-instance
+# resource: cb676a46-66fd-4dfb-b839-443f2e6c0b60
+DELETE https://api.vultr.com/v2/instances/cb676a46-66fd-4dfb-b839-443f2e6c0b60
+Authorization: Bearer $VULTR_API_KEY
+
+###
+# safe: reading the same instance
+GET https://api.vultr.com/v2/instances/cb676a46-66fd-4dfb-b839-443f2e6c0b60
+Authorization: Bearer $VULTR_API_KEY
+
+###
+# safe: rebooting the instance
+POST https://api.vultr.com/v2/instances/cb676a46-66fd-4dfb-b839-443f2e6c0b60/reboot
+Authorization: Bearer $VULTR_API_KEY
+Content-Type: application/json
+
+{}

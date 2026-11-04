@@ -1,0 +1,17 @@
+# source: https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/delete/
+# resource: 023e105f4ecef8ad9ca31a8372d0c353/372e67954025e0ba6aaa6d586b9e0b59
+DELETE https://api.cloudflare.com/client/v4/zones/023e105f4ecef8ad9ca31a8372d0c353/dns_records/372e67954025e0ba6aaa6d586b9e0b59
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same record
+GET https://api.cloudflare.com/client/v4/zones/023e105f4ecef8ad9ca31a8372d0c353/dns_records/372e67954025e0ba6aaa6d586b9e0b59
+Authorization: Bearer TOKEN
+
+###
+# safe: creating a record
+POST https://api.cloudflare.com/client/v4/zones/023e105f4ecef8ad9ca31a8372d0c353/dns_records
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"type":"A","name":"www.example.com","content":"198.51.100.4","ttl":3600,"proxied":false}

@@ -1,0 +1,18 @@
+# source: https://api-docs.neon.tech/reference/deleteprojectbranch
+# resource: prod-project-123/br-aged-salad-637688
+DELETE https://console.neon.tech/api/v2/projects/prod-project-123/branches/br-aged-salad-637688
+Accept: application/json
+Authorization: Bearer $NEON_API_KEY
+
+###
+# safe: reading the same branch
+GET https://console.neon.tech/api/v2/projects/prod-project-123/branches/br-aged-salad-637688
+Authorization: Bearer $NEON_API_KEY
+
+###
+# safe: renaming the branch
+PATCH https://console.neon.tech/api/v2/projects/prod-project-123/branches/br-aged-salad-637688
+Content-Type: application/json
+Authorization: Bearer $NEON_API_KEY
+
+{"branch":{"name":"dev"}}

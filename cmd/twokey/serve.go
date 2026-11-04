@@ -157,16 +157,17 @@ func cmdRun(args []string) error {
 	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+")")
 	strict := fs.Bool("strict", false, "run the agent in a Docker container whose only network egress is twokey")
 	image := fs.String("image", "", "with --strict: container image that contains the agent")
+	observe := fs.Bool("observe", false, "one-terminal trial mode: in-process proxy that logs what would be held but holds nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	argv := fs.Args()
 	if len(argv) == 0 {
-		return errors.New("usage: twokey run [--addr A | --phone] -- <agent> [args...]")
+		return errors.New("usage: twokey run [--addr A | --phone | --observe] -- <agent> [args...]")
 	}
 
 	proxyAddr := *addr
-	if *phone {
+	if *phone || *observe {
 		home, err := homeDir()
 		if err != nil {
 			return setupFailure(err)
@@ -186,6 +187,7 @@ func cmdRun(args []string) error {
 			ntfyTopic: os.Getenv("TWOKEY_NTFY_TOPIC"), ntfyServer: envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"),
 			logTo:     logFile, // keep diagnostics out of the agent's TUI
 			allowFile: *allow,
+			observe:   *observe,
 		})
 		if err != nil {
 			return setupFailure(err)

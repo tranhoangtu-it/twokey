@@ -1,0 +1,20 @@
+# source: https://docs.railway.com/reference/public-api
+# schema: introspection of https://backboard.railway.com/graphql/v2 -> projectDelete(id: String!)
+# resource: proj-9d2
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+Authorization: Bearer TOKEN
+
+{"query":"mutation projectDelete($id: String!) { projectDelete(id: $id) }","variables":{"id":"proj-9d2"}}
+###
+# safe: reading the same project
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"query project($id: String!) { project(id: $id) { id name } }","variables":{"id":"proj-9d2"}}
+###
+# safe: updating the project is not a delete
+POST https://backboard.railway.com/graphql/v2
+Content-Type: application/json
+
+{"query":"mutation projectUpdate($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { id } }","variables":{"id":"proj-9d2","input":{"name":"renamed"}}}

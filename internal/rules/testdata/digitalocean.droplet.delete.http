@@ -1,0 +1,18 @@
+# source: https://docs.digitalocean.com/reference/api/reference/droplets/#droplets_destroy
+# resource: 3164494
+DELETE https://api.digitalocean.com/v2/droplets/3164494
+Content-Type: application/json
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: reading the same droplet
+GET https://api.digitalocean.com/v2/droplets/3164494
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: rebooting via a droplet action
+POST https://api.digitalocean.com/v2/droplets/3164494/actions
+Content-Type: application/json
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+{"type":"reboot"}

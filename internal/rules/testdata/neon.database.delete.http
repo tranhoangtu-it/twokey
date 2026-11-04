@@ -1,0 +1,18 @@
+# source: https://api-docs.neon.tech/reference/deleteprojectbranchdatabase
+# resource: prod-project-123/br-aged-salad-637688/neondb
+DELETE https://console.neon.tech/api/v2/projects/prod-project-123/branches/br-aged-salad-637688/databases/neondb
+Accept: application/json
+Authorization: Bearer $NEON_API_KEY
+
+###
+# safe: reading the same database
+GET https://console.neon.tech/api/v2/projects/prod-project-123/branches/br-aged-salad-637688/databases/neondb
+Authorization: Bearer $NEON_API_KEY
+
+###
+# safe: creating a database on the branch
+POST https://console.neon.tech/api/v2/projects/prod-project-123/branches/br-aged-salad-637688/databases
+Content-Type: application/json
+Authorization: Bearer $NEON_API_KEY
+
+{"database":{"name":"appdb","owner_name":"neondb_owner"}}

@@ -1,0 +1,17 @@
+# source: https://techdocs.akamai.com/linode-api/reference/delete-linode-instance
+# resource: 234
+DELETE https://api.linode.com/v4/linode/instances/234
+Authorization: Bearer $LINODE_TOKEN
+
+###
+# safe: reading the same instance
+GET https://api.linode.com/v4/linode/instances/234
+Authorization: Bearer $LINODE_TOKEN
+
+###
+# safe: rebooting the instance
+POST https://api.linode.com/v4/linode/instances/234/reboot
+Authorization: Bearer $LINODE_TOKEN
+Content-Type: application/json
+
+{}

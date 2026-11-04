@@ -1,0 +1,17 @@
+# source: https://docs.hetzner.cloud/reference/cloud#volumes-delete-a-volume
+# resource: 4711
+DELETE https://api.hetzner.cloud/v1/volumes/4711
+Authorization: Bearer $HCLOUD_TOKEN
+
+###
+# safe: reading the same volume
+GET https://api.hetzner.cloud/v1/volumes/4711
+Authorization: Bearer $HCLOUD_TOKEN
+
+###
+# safe: creating a volume
+POST https://api.hetzner.cloud/v1/volumes
+Authorization: Bearer $HCLOUD_TOKEN
+Content-Type: application/json
+
+{"name":"database-storage","size":42,"location":"nbg1"}

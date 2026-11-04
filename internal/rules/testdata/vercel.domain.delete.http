@@ -1,0 +1,17 @@
+# source: https://vercel.com/docs/rest-api/reference/endpoints/domains/remove-a-domain-by-name
+# resource: example.com
+DELETE https://api.vercel.com/v6/domains/example.com
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same domain
+GET https://api.vercel.com/v5/domains/example.com
+Authorization: Bearer TOKEN
+
+###
+# safe: adding a domain
+POST https://api.vercel.com/v7/domains
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"example.org"}

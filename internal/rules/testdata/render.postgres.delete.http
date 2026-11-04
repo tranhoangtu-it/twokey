@@ -1,0 +1,18 @@
+# source: https://api-docs.render.com/reference/delete-postgres
+# resource: dpg-cph1a2b3c4d5e6f7g8h9-a
+DELETE https://api.render.com/v1/postgres/dpg-cph1a2b3c4d5e6f7g8h9-a
+Accept: application/json
+Authorization: Bearer $RENDER_API_KEY
+
+###
+# safe: reading the same Postgres instance
+GET https://api.render.com/v1/postgres/dpg-cph1a2b3c4d5e6f7g8h9-a
+Authorization: Bearer $RENDER_API_KEY
+
+###
+# safe: updating the instance
+PATCH https://api.render.com/v1/postgres/dpg-cph1a2b3c4d5e6f7g8h9-a
+Content-Type: application/json
+Authorization: Bearer $RENDER_API_KEY
+
+{"name":"renamed-db"}

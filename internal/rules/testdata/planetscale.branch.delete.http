@@ -1,0 +1,18 @@
+# source: https://api-docs.planetscale.com/reference/delete_branch
+# resource: acme/prod-db/feature-x
+DELETE https://api.planetscale.com/v1/organizations/acme/databases/prod-db/branches/feature-x
+Authorization: $PLANETSCALE_SERVICE_TOKEN_ID:$PLANETSCALE_SERVICE_TOKEN
+Accept: application/json
+
+###
+# safe: reading the same branch
+GET https://api.planetscale.com/v1/organizations/acme/databases/prod-db/branches/feature-x
+Authorization: $PLANETSCALE_SERVICE_TOKEN_ID:$PLANETSCALE_SERVICE_TOKEN
+
+###
+# safe: creating a branch
+POST https://api.planetscale.com/v1/organizations/acme/databases/prod-db/branches
+Authorization: $PLANETSCALE_SERVICE_TOKEN_ID:$PLANETSCALE_SERVICE_TOKEN
+Content-Type: application/json
+
+{"name":"feature-y","parent_branch":"main"}

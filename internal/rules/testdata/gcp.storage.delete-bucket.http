@@ -1,0 +1,12 @@
+# source: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/delete
+# resource: my-bucket
+DELETE https://storage.googleapis.com/storage/v1/b/my-bucket
+###
+# safe: reading the same bucket
+GET https://storage.googleapis.com/storage/v1/b/my-bucket
+###
+# safe: creating a bucket
+POST https://storage.googleapis.com/storage/v1/b?project=my-project
+Content-Type: application/json
+
+{"name": "my-bucket-2"}

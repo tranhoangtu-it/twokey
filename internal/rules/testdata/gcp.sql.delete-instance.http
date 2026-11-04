@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/sql/docs/mysql/admin-api/rest/v1/instances/delete
+# resource: my-project/prod-db
+DELETE https://sqladmin.googleapis.com/v1/projects/my-project/instances/prod-db
+###
+# safe: reading the same instance
+GET https://sqladmin.googleapis.com/v1/projects/my-project/instances/prod-db
+###
+# safe: restarting the same instance
+POST https://sqladmin.googleapis.com/v1/projects/my-project/instances/prod-db/restart

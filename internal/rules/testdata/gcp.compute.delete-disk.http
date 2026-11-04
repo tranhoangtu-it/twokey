@@ -1,0 +1,12 @@
+# source: https://docs.cloud.google.com/compute/docs/reference/rest/v1/disks/delete
+# resource: my-project/us-central1-a/data-disk
+DELETE https://compute.googleapis.com/compute/v1/projects/my-project/zones/us-central1-a/disks/data-disk
+###
+# safe: reading the same disk
+GET https://compute.googleapis.com/compute/v1/projects/my-project/zones/us-central1-a/disks/data-disk
+###
+# safe: snapshotting the same disk
+POST https://compute.googleapis.com/compute/v1/projects/my-project/zones/us-central1-a/disks/data-disk/createSnapshot
+Content-Type: application/json
+
+{"name": "data-disk-snap"}

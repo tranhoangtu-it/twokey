@@ -1,0 +1,23 @@
+# source: https://docs.digitalocean.com/reference/api/reference/databases/#databases_destroy_cluster
+# resource: 9cc10173-e9ea-4176-9dbc-a4cee4c4ff30
+DELETE https://api.digitalocean.com/v2/databases/9cc10173-e9ea-4176-9dbc-a4cee4c4ff30
+Content-Type: application/json
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: reading the same cluster
+GET https://api.digitalocean.com/v2/databases/9cc10173-e9ea-4176-9dbc-a4cee4c4ff30
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: deleting a database user is not destroying the cluster
+DELETE https://api.digitalocean.com/v2/databases/9cc10173-e9ea-4176-9dbc-a4cee4c4ff30/users/app-01
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+###
+# safe: creating a cluster
+POST https://api.digitalocean.com/v2/databases
+Content-Type: application/json
+Authorization: Bearer $DIGITALOCEAN_TOKEN
+
+{"name":"backend","engine":"pg","version":"14","region":"nyc3","size":"db-s-2vcpu-4gb","num_nodes":2}

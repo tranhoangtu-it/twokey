@@ -1,0 +1,18 @@
+# source: https://devcenter.heroku.com/articles/platform-api-reference#add-on-delete
+# resource: example-app/postgresql-curved-12345
+DELETE https://api.heroku.com/apps/example-app/addons/postgresql-curved-12345
+Accept: application/vnd.heroku+json; version=3
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same add-on
+GET https://api.heroku.com/apps/example-app/addons/postgresql-curved-12345
+Accept: application/vnd.heroku+json; version=3
+
+###
+# safe: creating an add-on
+POST https://api.heroku.com/apps/example-app/addons
+Accept: application/vnd.heroku+json; version=3
+Content-Type: application/json
+
+{"plan":"heroku-postgresql:essential-0"}

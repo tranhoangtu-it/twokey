@@ -1,0 +1,17 @@
+# source: https://docs.turso.tech/api-reference/databases/delete
+# resource: acme/prod-db
+DELETE https://api.turso.tech/v1/organizations/acme/databases/prod-db
+Authorization: Bearer $TURSO_API_TOKEN
+
+###
+# safe: reading the same database
+GET https://api.turso.tech/v1/organizations/acme/databases/prod-db
+Authorization: Bearer $TURSO_API_TOKEN
+
+###
+# safe: creating a database
+POST https://api.turso.tech/v1/organizations/acme/databases
+Authorization: Bearer $TURSO_API_TOKEN
+Content-Type: application/json
+
+{"name":"new-db","group":"default"}

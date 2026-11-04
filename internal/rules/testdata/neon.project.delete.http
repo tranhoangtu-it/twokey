@@ -1,0 +1,18 @@
+# source: https://api-docs.neon.tech/reference/deleteproject
+# resource: prod-project-123
+DELETE https://console.neon.tech/api/v2/projects/prod-project-123
+Accept: application/json
+Authorization: Bearer $NEON_API_KEY
+
+###
+# safe: reading the same project
+GET https://console.neon.tech/api/v2/projects/prod-project-123
+Authorization: Bearer $NEON_API_KEY
+
+###
+# safe: creating a project
+POST https://console.neon.tech/api/v2/projects
+Content-Type: application/json
+Authorization: Bearer $NEON_API_KEY
+
+{"project":{"name":"x"}}

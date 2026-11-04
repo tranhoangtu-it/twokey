@@ -248,6 +248,18 @@ func TestPlainHTTPDestructiveRequestIsHeld(t *testing.T) {
 	}
 }
 
+func TestObserveModeForwardsWithoutHolding(t *testing.T) {
+	h := newHarness(t)
+	h.broker.SetObserve(true)
+	resp, body := h.do(t, "DELETE", "/repos/acme/api", "")
+	if resp.StatusCode != 200 || body != "upstream says hi" || h.upstreamHits.Load() != 1 {
+		t.Fatalf("got %d %q hits=%d", resp.StatusCode, body, h.upstreamHits.Load())
+	}
+	if h.decider.holds.Load() != 0 {
+		t.Fatal("observe mode must not prompt a human")
+	}
+}
+
 func TestApprovedDestructiveRequestIsForwarded(t *testing.T) {
 	h := newHarness(t)
 	h.decider.approve.Store(true)

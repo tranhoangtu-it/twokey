@@ -1,0 +1,17 @@
+# source: https://www.mongodb.com/docs/api/doc/atlas-admin-api-v2/operation/operation-deletegroupcluster
+# resource: 32b6e34b3d91647abb20e7b8/prod-cluster
+DELETE https://cloud.mongodb.com/api/atlas/v2/groups/32b6e34b3d91647abb20e7b8/clusters/prod-cluster
+Authorization: Bearer $ATLAS_ACCESS_TOKEN
+Accept: application/vnd.atlas.2025-03-12+json
+
+###
+# safe: reading the same cluster
+GET https://cloud.mongodb.com/api/atlas/v2/groups/32b6e34b3d91647abb20e7b8/clusters/prod-cluster
+Authorization: Bearer $ATLAS_ACCESS_TOKEN
+Accept: application/vnd.atlas.2025-03-12+json
+
+###
+# safe: listing clusters in the project
+GET https://cloud.mongodb.com/api/atlas/v2/groups/32b6e34b3d91647abb20e7b8/clusters
+Authorization: Bearer $ATLAS_ACCESS_TOKEN
+Accept: application/vnd.atlas.2025-03-12+json

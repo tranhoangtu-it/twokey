@@ -1,0 +1,17 @@
+# source: https://developers.cloudflare.com/api/resources/r2/subresources/buckets/methods/delete/
+# resource: example-bucket
+DELETE https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/r2/buckets/example-bucket
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same bucket
+GET https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/r2/buckets/example-bucket
+Authorization: Bearer TOKEN
+
+###
+# safe: creating a bucket
+POST https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/r2/buckets
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"new-bucket"}

@@ -113,7 +113,16 @@ type Broker struct {
 	mu        sync.Mutex
 	pending   map[string]*entry
 	notifiers []Notifier
+	observe   atomic.Bool
 }
+
+// SetObserve switches observe mode: every request that would be held is
+// approved at once (By "observe") and reported to Observer channels only.
+// It is for trying twokey safely — nothing is protected while it is on.
+func (b *Broker) SetObserve(on bool) { b.observe.Store(on) }
+
+// Observing reports whether observe mode is on.
+func (b *Broker) Observing() bool { return b.observe.Load() }
 
 // NewBroker returns a broker that denies requests nobody answers in timeout.
 func NewBroker(timeout time.Duration) *Broker {
@@ -133,6 +142,9 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	req.ID = strconv.FormatUint(b.seq.Add(1), 10)
 	req.Nonce = randomNonce()
 	req.Created = time.Now()
+	if b.observe.Load() {
+		return req, b.observed(req)
+	}
 	e := &entry{req: req, ch: make(chan Decision, 1)}
 
 	b.mu.Lock()
@@ -160,6 +172,18 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 		n.Closed(req, d)
 	}
 	return req, d
+}
+
+func (b *Broker) observed(req Request) Decision {
+	b.mu.Lock()
+	notifiers := append([]Notifier(nil), b.notifiers...)
+	b.mu.Unlock()
+	for _, n := range notifiers {
+		if o, ok := n.(Observer); ok {
+			o.Observed(req)
+		}
+	}
+	return Decision{Approved: true, By: "observe", Reason: "observe mode: would have been held, forwarded unprotected"}
 }
 
 // expire removes e unless a decision raced in, which then wins.

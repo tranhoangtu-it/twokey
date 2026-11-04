@@ -1,0 +1,17 @@
+# source: https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/delete/
+# resource: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+DELETE https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/d1/database/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same database
+GET https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/d1/database/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+Authorization: Bearer TOKEN
+
+###
+# safe: creating a database
+POST https://api.cloudflare.com/client/v4/accounts/023e105f4ecef8ad9ca31a8372d0c353/d1/database
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"my-database"}

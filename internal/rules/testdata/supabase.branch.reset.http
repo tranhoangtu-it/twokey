@@ -1,0 +1,19 @@
+# source: https://supabase.com/docs/reference/api/v1-reset-a-branch
+# resource: qrstuvwxyzabcdefghij
+POST https://api.supabase.com/v1/branches/qrstuvwxyzabcdefghij/reset
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+Content-Type: application/json
+
+{}
+###
+# safe: reading the same branch
+GET https://api.supabase.com/v1/branches/qrstuvwxyzabcdefghij
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+
+###
+# safe: pushing migrations to the branch adds, does not wipe
+POST https://api.supabase.com/v1/branches/qrstuvwxyzabcdefghij/push
+Authorization: Bearer $SUPABASE_ACCESS_TOKEN
+Content-Type: application/json
+
+{}

@@ -1,0 +1,18 @@
+# source: https://docs.github.com/en/rest/orgs/orgs#delete-an-organization
+# resource: acme
+DELETE https://api.github.com/orgs/acme
+Accept: application/vnd.github+json
+X-GitHub-Api-Version: 2022-11-28
+
+###
+# safe: reading the same organization
+GET https://api.github.com/orgs/acme
+Accept: application/vnd.github+json
+
+###
+# safe: updating organization settings
+PATCH https://api.github.com/orgs/acme
+Accept: application/vnd.github+json
+Content-Type: application/json
+
+{"description":"Acme Inc."}

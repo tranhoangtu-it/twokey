@@ -1,0 +1,18 @@
+# source: https://devcenter.heroku.com/articles/platform-api-reference#app-delete
+# resource: example-app
+DELETE https://api.heroku.com/apps/example-app
+Accept: application/vnd.heroku+json; version=3
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same app
+GET https://api.heroku.com/apps/example-app
+Accept: application/vnd.heroku+json; version=3
+
+###
+# safe: updating the app
+PATCH https://api.heroku.com/apps/example-app
+Accept: application/vnd.heroku+json; version=3
+Content-Type: application/json
+
+{"maintenance":true}

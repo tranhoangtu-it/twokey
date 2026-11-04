@@ -49,16 +49,19 @@ const usage = `twokey VERSION — make your AI agent ask a human before it delet
 
 Usage:
   twokey replay pocketos                               see what twokey does, in 5 seconds
-  twokey up [--phone] [--timeout 2m]                   start the proxy + approval prompt
+  twokey up [--phone] [--timeout 2m] [--observe]       start the proxy + approval prompt
   twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
+  twokey run --observe -- <agent> [args...]            trial: log what would be held, hold nothing
   twokey phone [--rotate]                              set up approvals on your phone (ntfy)
   twokey pg --upstream HOST:5432 [--upstream-tls]      guard a Postgres database (DROP, TRUNCATE, …)
   twokey mysql --upstream HOST:3306                    guard a MySQL database
-  twokey env [--shell sh|powershell]                   print the variables 'run' sets
+  twokey log [-n 20] [--denied] [--provider P] [--since 24h] [--json]  what was held and decided
+  twokey env [--shell sh|powershell]                 print the variables 'run' sets
   twokey doctor [--addr A]                             check curl/python/node/go are covered
   twokey replay <scenario> [--live]                    replay a real-world incident
   twokey explain --method M --url U [-H k:v] [--data D] would this request be held?
   twokey rules [--rules DIR]                           list destructive-operation rules
+  twokey rules test --rules DIR [--fixtures DIR]       check your rules against .http fixtures
   twokey ca init|path|trust|untrust|reset              manage the local CA
   twokey uninstall [--purge]                           remove OS trust + Docker objects (and ~/.twokey)
   twokey version
@@ -117,6 +120,8 @@ func dispatch(args []string) error {
 		return cmdCA(rest)
 	case "uninstall":
 		return cmdUninstall(rest)
+	case "log":
+		return cmdLog(rest)
 	case "mysql":
 		return cmdMySQL(rest)
 	case "pg":
@@ -198,6 +203,9 @@ func loadEngine(dir string) (*rules.Engine, error) {
 // ---- rules / explain / replay ------------------------------------------------
 
 func cmdRules(args []string) error {
+	if len(args) > 0 && args[0] == "test" {
+		return cmdRulesTest(args[1:])
+	}
 	fs := flag.NewFlagSet("rules", flag.ContinueOnError)
 	dir := fs.String("rules", "", "extra rule pack directory")
 	if err := fs.Parse(args); err != nil {

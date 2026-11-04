@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects/delete
+# resource: my-project
+DELETE https://cloudresourcemanager.googleapis.com/v3/projects/my-project
+###
+# safe: reading the same project
+GET https://cloudresourcemanager.googleapis.com/v3/projects/my-project
+###
+# safe: undeleting the same project
+POST https://cloudresourcemanager.googleapis.com/v3/projects/my-project:undelete

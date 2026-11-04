@@ -1,0 +1,12 @@
+# source: https://docs.aws.amazon.com/lambda/latest/api/API_DeleteFunction.html
+# resource: my-function
+DELETE https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/my-function
+###
+# safe: reading the same function
+GET https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/my-function
+###
+# safe: invoking the same function
+POST https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/my-function/invocations
+Content-Type: application/json
+
+{"ping": true}

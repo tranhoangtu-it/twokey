@@ -1,0 +1,17 @@
+# source: https://open-api.netlify.com/#tag/site/operation/deleteSite
+# resource: 3970e0fe-8564-4903-9a55-c5f8de49fb8b
+DELETE https://api.netlify.com/api/v1/sites/3970e0fe-8564-4903-9a55-c5f8de49fb8b
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same site
+GET https://api.netlify.com/api/v1/sites/3970e0fe-8564-4903-9a55-c5f8de49fb8b
+Authorization: Bearer TOKEN
+
+###
+# safe: updating the site
+PATCH https://api.netlify.com/api/v1/sites/3970e0fe-8564-4903-9a55-c5f8de49fb8b
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"renamed-site"}

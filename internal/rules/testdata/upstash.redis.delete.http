@@ -1,0 +1,17 @@
+# source: https://upstash.com/docs/devops/developer-api/redis/delete_database
+# resource: 6c9eaafd-9627-4fa5-8fa5-9b7c4c2e2b6a
+DELETE https://api.upstash.com/v2/redis/database/6c9eaafd-9627-4fa5-8fa5-9b7c4c2e2b6a
+Authorization: Basic $UPSTASH_BASIC_AUTH
+
+###
+# safe: reading the same database
+GET https://api.upstash.com/v2/redis/database/6c9eaafd-9627-4fa5-8fa5-9b7c4c2e2b6a
+Authorization: Basic $UPSTASH_BASIC_AUTH
+
+###
+# safe: creating a database
+POST https://api.upstash.com/v2/redis/database
+Authorization: Basic $UPSTASH_BASIC_AUTH
+Content-Type: application/json
+
+{"database_name":"new-db","platform":"aws","primary_region":"us-east-1"}
