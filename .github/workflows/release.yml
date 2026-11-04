@@ -57,8 +57,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-    env:
-      TWOKEY_HOME: ${{ runner.temp }}/twokey-home
     steps:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: matrix.channel == 'go'
@@ -89,6 +87,8 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Run the installed binary
         shell: bash
+        env:
+          TWOKEY_HOME: ${{ runner.temp }}/twokey-home   # runner context: step level only
         run: |
           twokey version | tee version.txt
           grep -q "${GITHUB_REF_NAME#v}" version.txt

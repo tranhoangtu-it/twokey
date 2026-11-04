@@ -40,6 +40,10 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.2.0 ./...
+      # Workflows that only run on tags (release.yml) are otherwise first
+      # validated when a release is cut.
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck=
 
   # Short fuzz runs of the parsers that decide hold vs pass. Longer runs:
   # go test ./internal/rules -run '^$' -fuzz FuzzEvaluate -fuzztime 10m
