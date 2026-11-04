@@ -1,0 +1,17 @@
+provider: heroku
+docs: https://devcenter.heroku.com/articles/platform-api-reference
+rules:
+  - id: heroku.app.delete
+    hosts: [api.heroku.com]
+    methods: [DELETE]
+    path: /apps/{app}
+    resource: "{app}"
+    severity: critical
+    message: Deletes a Heroku app with its add-ons and config.
+  - id: heroku.addon.delete
+    hosts: [api.heroku.com]
+    methods: [DELETE]
+    path: /apps/{app}/addons/{addon}
+    resource: "{app}/{addon}"
+    severity: critical
+    message: Deletes an add-on (e.g. Heroku Postgres and its data).

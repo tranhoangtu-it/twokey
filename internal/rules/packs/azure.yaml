@@ -1,0 +1,17 @@
+provider: azure
+docs: https://learn.microsoft.com/rest/api/resources/
+rules:
+  - id: azure.resource-group.delete
+    hosts: [management.azure.com]
+    methods: [DELETE]
+    path: /subscriptions/{subscription}/resourcegroups/{group}
+    resource: "{group}"
+    severity: critical
+    message: Deletes a resource group and EVERY resource in it.
+  - id: azure.resource.delete
+    hosts: [management.azure.com]
+    methods: [DELETE]
+    path: /subscriptions/{subscription}/resourcegroups/{group}/providers/{resource...}
+    resource: "{group}/{resource}"
+    severity: high
+    message: Deletes an Azure resource.

@@ -154,7 +154,17 @@ func loadAuthority(engine *rules.Engine) (*ca.Authority, bool, error) {
 			return nil, false, err
 		}
 	}
-	return ca.LoadOrCreate(home, engine.Domains()...)
+	a, created, err := ca.LoadOrCreate(home, engine.Domains()...)
+	if errors.Is(err, ca.ErrConstraintsOutdated) {
+		// New providers since this CA was made: rotate instead of failing.
+		if rerr := ca.Rotate(home); rerr != nil {
+			return nil, false, fmt.Errorf("%v (and rotating it failed: %w)", err, rerr)
+		}
+		fmt.Fprintln(os.Stderr, "twokey: rule packs now cover more domains, so a new local CA was created "+
+			"(old one kept as ca.old.pem). If you used `twokey ca trust`, run it again.")
+		return ca.LoadOrCreate(home, engine.Domains()...)
+	}
+	return a, created, err
 }
 
 // loadEngine combines builtin packs with optional user packs from dir.

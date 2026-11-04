@@ -189,6 +189,25 @@ func TestEvaluate(t *testing.T) {
 			wantRule: "github.graphql.delete", wantResource: "I_1",
 		},
 		{
+			name:     "azure resource group delete (SDK casing)",
+			req:      Request{Method: "DELETE", Host: "management.azure.com", Path: "/subscriptions/s1/resourceGroups/prod-rg", Query: "api-version=2021-04-01"},
+			wantRule: "azure.resource-group.delete", wantResource: "prod-rg",
+		},
+		{
+			name:     "gcp bucket delete",
+			req:      Request{Method: "DELETE", Host: "storage.googleapis.com", Path: "/storage/v1/b/backups"},
+			wantRule: "gcp.storage.delete-bucket", wantResource: "backups",
+		},
+		{
+			name:     "heroku app delete",
+			req:      Request{Method: "DELETE", Host: "api.heroku.com", Path: "/apps/shop-prod"},
+			wantRule: "heroku.app.delete", wantResource: "shop-prod",
+		},
+		{
+			name: "gcp object delete is not a bucket delete",
+			req:  Request{Method: "DELETE", Host: "storage.googleapis.com", Path: "/storage/v1/b/backups/o/file.txt"},
+		},
+		{
 			name: "unwatched host passes",
 			req:  Request{Method: "DELETE", Host: "example.com", Path: "/repos/a/b"},
 		},

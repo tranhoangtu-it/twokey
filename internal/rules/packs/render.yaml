@@ -1,0 +1,17 @@
+provider: render
+docs: https://api-docs.render.com/
+rules:
+  - id: render.service.delete
+    hosts: [api.render.com]
+    methods: [DELETE]
+    path: /v1/services/{service}
+    resource: "{service}"
+    severity: critical
+    message: Deletes a Render service.
+  - id: render.postgres.delete
+    hosts: [api.render.com]
+    methods: [DELETE]
+    path: /v1/postgres/{database}
+    resource: "{database}"
+    severity: critical
+    message: Deletes a Render Postgres database.

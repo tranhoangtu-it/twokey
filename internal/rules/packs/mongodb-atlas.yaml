@@ -1,0 +1,10 @@
+provider: mongodb-atlas
+docs: https://www.mongodb.com/docs/atlas/reference/api-resources-spec/
+rules:
+  - id: mongodb-atlas.cluster.delete
+    hosts: [cloud.mongodb.com]
+    methods: [DELETE]
+    path: /api/atlas/{version}/groups/{group}/clusters/{cluster}
+    resource: "{group}/{cluster}"
+    severity: critical
+    message: Deletes a MongoDB Atlas cluster and its data.

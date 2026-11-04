@@ -1,0 +1,10 @@
+provider: netlify
+docs: https://open-api.netlify.com/
+rules:
+  - id: netlify.site.delete
+    hosts: [api.netlify.com]
+    methods: [DELETE]
+    path: /api/v1/sites/{site}
+    resource: "{site}"
+    severity: critical
+    message: Deletes a Netlify site.

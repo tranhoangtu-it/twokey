@@ -1,0 +1,17 @@
+provider: planetscale
+docs: https://api-docs.planetscale.com/
+rules:
+  - id: planetscale.database.delete
+    hosts: [api.planetscale.com]
+    methods: [DELETE]
+    path: /v1/organizations/{org}/databases/{database}
+    resource: "{org}/{database}"
+    severity: critical
+    message: Deletes a PlanetScale database.
+  - id: planetscale.branch.delete
+    hosts: [api.planetscale.com]
+    methods: [DELETE]
+    path: /v1/organizations/{org}/databases/{database}/branches/{branch}
+    resource: "{org}/{database}/{branch}"
+    severity: high
+    message: Deletes a PlanetScale branch.

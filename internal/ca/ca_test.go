@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,8 +70,18 @@ func TestNameConstrainedCA(t *testing.T) {
 	if _, err := a.LeafFor("www.mybank.com"); err == nil {
 		t.Fatal("CA must refuse hosts outside its name constraints")
 	}
-	if _, _, err := LoadOrCreate(dir, "github.com", "amazonaws.com"); err == nil || !strings.Contains(err.Error(), "ca reset") {
-		t.Fatalf("rules outside the CA's constraints must ask for a reset, got %v", err)
+	if _, _, err := LoadOrCreate(dir, "github.com", "amazonaws.com"); !errors.Is(err, ErrConstraintsOutdated) {
+		t.Fatalf("rules outside the CA's constraints must report ErrConstraintsOutdated, got %v", err)
+	}
+	if err := Rotate(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, created, err := LoadOrCreate(dir, "github.com", "amazonaws.com")
+	if err != nil || !created || bytes.Equal(b.CertPEM(), a.CertPEM()) {
+		t.Fatalf("rotation should create a new covering CA: created=%v err=%v", created, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ca.old.pem")); err != nil {
+		t.Fatal("old CA must be kept as ca.old.pem")
 	}
 	if _, _, err := LoadOrCreate(dir, "github.com"); err != nil {
 		t.Fatalf("subset of constraints must load: %v", err)

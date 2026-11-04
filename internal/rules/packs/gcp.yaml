@@ -1,0 +1,45 @@
+provider: gcp
+docs: https://cloud.google.com/apis/docs/overview
+rules:
+  - id: gcp.storage.delete-bucket
+    hosts: [storage.googleapis.com]
+    methods: [DELETE]
+    path: /storage/v1/b/{bucket}
+    resource: "{bucket}"
+    severity: critical
+    message: Deletes a Cloud Storage bucket.
+  - id: gcp.sql.delete-instance
+    hosts: [sqladmin.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/instances/{instance}
+    resource: "{project}/{instance}"
+    severity: critical
+    message: Deletes a Cloud SQL instance and its data.
+  - id: gcp.sql.delete-instance-legacy-path
+    hosts: [sqladmin.googleapis.com]
+    methods: [DELETE]
+    path: /sql/{version}/projects/{project}/instances/{instance}
+    resource: "{project}/{instance}"
+    severity: critical
+    message: Deletes a Cloud SQL instance and its data.
+  - id: gcp.compute.delete-instance
+    hosts: [compute.googleapis.com]
+    methods: [DELETE]
+    path: /compute/{version}/projects/{project}/zones/{zone}/instances/{instance}
+    resource: "{project}/{zone}/{instance}"
+    severity: critical
+    message: Deletes a Compute Engine VM.
+  - id: gcp.compute.delete-disk
+    hosts: [compute.googleapis.com]
+    methods: [DELETE]
+    path: /compute/{version}/projects/{project}/zones/{zone}/disks/{disk}
+    resource: "{project}/{zone}/{disk}"
+    severity: critical
+    message: Deletes a persistent disk and its data.
+  - id: gcp.project.delete
+    hosts: [cloudresourcemanager.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}
+    resource: "{project}"
+    severity: critical
+    message: Schedules an entire Google Cloud project for deletion.

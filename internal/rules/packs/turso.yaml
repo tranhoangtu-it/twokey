@@ -1,0 +1,10 @@
+provider: turso
+docs: https://docs.turso.tech/api-reference
+rules:
+  - id: turso.database.delete
+    hosts: [api.turso.tech]
+    methods: [DELETE]
+    path: /v1/organizations/{org}/databases/{database}
+    resource: "{org}/{database}"
+    severity: critical
+    message: Deletes a Turso database.
