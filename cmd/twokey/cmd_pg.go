@@ -35,7 +35,10 @@ func cmdPG(args []string) error    { return cmdDBGuard(postgresGuard, args) }
 func cmdMySQL(args []string) error { return cmdDBGuard(mysqlGuard, args) }
 
 // dbServer is what both guards provide.
-type dbServer interface{ Serve(net.Listener) error }
+type dbServer interface {
+	Serve(net.Listener) error
+	Close() error
+}
 
 // cmdDBGuard runs a database guard: point the agent's connection string at
 // the local port instead of the real database.
@@ -126,7 +129,8 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	}
 
 	fmt.Printf("twokey %s — %s guard on %s → %s\n", version, g.name, ln.Addr(), *upstream)
-	fmt.Println("  holds    DROP …, TRUNCATE, DELETE/UPDATE without WHERE, ALTER TABLE … DROP")
+	fmt.Println("  holds    DROP …, TRUNCATE, DELETE/UPDATE without WHERE, ALTER TABLE … DROP, MERGE … DELETE")
+	fmt.Println("           (also inside WITH/EXPLAIN/COPY), and SQL it cannot inspect (DO, CALL, dynamic EXECUTE)")
 	for _, ch := range channels {
 		fmt.Printf("  approve  %s\n", ch)
 	}
@@ -148,5 +152,8 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	}
 	err = ln.Close()
 	denyAndDrain(broker) // before the deferred audit close
+	if cerr := srv.Close(); err == nil {
+		err = cerr // closes client and upstream connections still open
+	}
 	return err
 }
