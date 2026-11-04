@@ -51,6 +51,7 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
 	allowFile := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
 	observe := fs.Bool("observe", false, "log and audit statements that would be held, but hold nothing")
+	noDesktop := fs.Bool("no-desktop", false, "no native desktop notification when a statement is held")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -99,7 +100,7 @@ func cmdDBGuard(g dbGuard, args []string) error {
 	logger := log.New(os.Stderr, "twokey: ", log.LstdFlags)
 	broker, channels, err := setupApprovals(ctx, proxyConfig{
 		timeout: *timeout, phone: *phone, ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true,
-		observe: *observe,
+		observe: *observe, noDesktop: *noDesktop,
 	}, home, logger)
 	if err != nil {
 		return err

@@ -114,7 +114,16 @@ type Broker struct {
 	pending   map[string]*entry
 	notifiers []Notifier
 	observe   atomic.Bool
+	grants    *Grants
 }
+
+// GrantObserver is told when a timed approval decided a request.
+type GrantObserver interface {
+	Granted(Request, Decision)
+}
+
+// Grants returns the broker's timed approvals.
+func (b *Broker) Grants() *Grants { return b.grants }
 
 // SetObserve switches observe mode: every request that would be held is
 // approved at once (By "observe") and reported to Observer channels only.
@@ -126,7 +135,7 @@ func (b *Broker) Observing() bool { return b.observe.Load() }
 
 // NewBroker returns a broker that denies requests nobody answers in timeout.
 func NewBroker(timeout time.Duration) *Broker {
-	return &Broker{timeout: timeout, pending: map[string]*entry{}}
+	return &Broker{timeout: timeout, pending: map[string]*entry{}, grants: NewGrants()}
 }
 
 // AddNotifier registers an approval channel. Call before serving traffic.
@@ -144,6 +153,9 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	req.Created = time.Now()
 	if b.observe.Load() {
 		return req, b.observed(req)
+	}
+	if b.grants.Covers(req) {
+		return req, b.granted(req)
 	}
 	e := &entry{req: req, ch: make(chan Decision, 1)}
 
@@ -184,6 +196,19 @@ func (b *Broker) observed(req Request) Decision {
 		}
 	}
 	return Decision{Approved: true, By: "observe", Reason: "observe mode: would have been held, forwarded unprotected"}
+}
+
+func (b *Broker) granted(req Request) Decision {
+	d := Decision{Approved: true, By: "grant", Reason: "covered by a timed approval"}
+	b.mu.Lock()
+	notifiers := append([]Notifier(nil), b.notifiers...)
+	b.mu.Unlock()
+	for _, n := range notifiers {
+		if o, ok := n.(GrantObserver); ok {
+			o.Granted(req, d)
+		}
+	}
+	return d
 }
 
 // expire removes e unless a decision raced in, which then wins.

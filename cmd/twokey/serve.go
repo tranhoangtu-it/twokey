@@ -35,6 +35,8 @@ func cmdUp(args []string) error {
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic (default: the one from `twokey phone`)")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
 	allow := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
+	observe := fs.Bool("observe", false, "try twokey safely: log and audit what would be held, but hold nothing")
+	noDesktop := fs.Bool("no-desktop", false, "no native desktop notification when a request is held")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -43,6 +45,7 @@ func cmdUp(args []string) error {
 	p, err := startProxy(ctx, proxyConfig{
 		addr: *addr, timeout: *timeout, rulesDir: *rulesDir, phone: *phone,
 		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr, allowFile: *allow,
+		observe: *observe, noDesktop: *noDesktop,
 	})
 	if err != nil {
 		return err
@@ -158,6 +161,7 @@ func cmdRun(args []string) error {
 	strict := fs.Bool("strict", false, "run the agent in a Docker container whose only network egress is twokey")
 	image := fs.String("image", "", "with --strict: container image that contains the agent")
 	observe := fs.Bool("observe", false, "one-terminal trial mode: in-process proxy that logs what would be held but holds nothing")
+	noDesktop := fs.Bool("no-desktop", false, "with --phone: no native desktop notification when a request is held")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -188,6 +192,7 @@ func cmdRun(args []string) error {
 			logTo:     logFile, // keep diagnostics out of the agent's TUI
 			allowFile: *allow,
 			observe:   *observe,
+			noDesktop: *noDesktop,
 		})
 		if err != nil {
 			return setupFailure(err)

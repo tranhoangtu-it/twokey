@@ -260,6 +260,20 @@ func TestObserveModeForwardsWithoutHolding(t *testing.T) {
 	}
 }
 
+func TestTimedGrantForwardsOnlyTheGrantedResource(t *testing.T) {
+	h := newHarness(t)
+	grant := approval.Request{Matches: []rules.Match{{RuleID: "test.repo.delete", Resource: "acme/api"}}}
+	if _, err := h.broker.Grants().AddFor(grant, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := h.do(t, "DELETE", "/repos/acme/api", ""); resp.StatusCode != 200 || h.decider.holds.Load() != 0 {
+		t.Fatalf("granted request: %d holds=%d", resp.StatusCode, h.decider.holds.Load())
+	}
+	if resp, _ := h.do(t, "DELETE", "/repos/acme/other", ""); resp.StatusCode != http.StatusForbidden || h.decider.holds.Load() != 1 {
+		t.Fatalf("ungranted resource must still be held: %d holds=%d", resp.StatusCode, h.decider.holds.Load())
+	}
+}
+
 func TestApprovedDestructiveRequestIsForwarded(t *testing.T) {
 	h := newHarness(t)
 	h.decider.approve.Store(true)

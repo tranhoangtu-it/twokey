@@ -41,6 +41,7 @@ type proxyConfig struct {
 	logTo      io.Writer // where proxy diagnostics go
 	allowFile  string    // pre-approved operations (default: ./.twokey-allow.yaml if present)
 	observe    bool      // log and audit would-be holds but forward everything
+	noDesktop  bool      // no native desktop notification on holds
 }
 
 // observeChannel is the banner line for observe mode.
@@ -189,6 +190,10 @@ func setupApprovals(ctx context.Context, c proxyConfig, home string, logger *log
 	}
 	if len(channels) == 0 {
 		return nil, nil, errors.New("no approval channel: use the terminal or a phone (--phone, see `twokey phone`)")
+	}
+	if !c.noDesktop {
+		// Only a heads-up: approving still needs the terminal or the phone.
+		broker.AddNotifier(approval.NewDesktop(logger.Printf))
 	}
 	return broker, channels, nil
 }
