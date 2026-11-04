@@ -14,7 +14,7 @@ const MaxGrant = time.Hour
 // Grant pre-approves one exact operation until Expires: same method and
 // target (host/path or database), same rule, same resource and, for SQL,
 // the same statement. Approving `UPDATE users SET last_seen=now()` must not
-// pre-approve `UPDATE users SET password=''`, nor the same call on another
+// pre-approve `UPDATE users SET password=NULL`, nor the same call on another
 // host.
 type Grant struct {
 	ID        int

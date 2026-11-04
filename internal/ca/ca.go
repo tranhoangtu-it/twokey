@@ -26,8 +26,8 @@ const (
 	certFile       = "ca.pem"
 	keyFile        = "ca-key.pem"
 	caOrganization = "twokey" // Subject O of every twokey root; uninstall relies on it
-	rootValidity = 5 * 365 * 24 * time.Hour
-	leafValidity = 30 * 24 * time.Hour
+	rootValidity   = 5 * 365 * 24 * time.Hour
+	leafValidity   = 30 * 24 * time.Hour
 )
 
 // Authority is a loaded root CA plus a cache of minted leaf certificates.
