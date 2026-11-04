@@ -79,6 +79,22 @@ func TestCheckFixtureCatchesWrongRuleAndResource(t *testing.T) {
 	}
 }
 
+// A query key repeated with different values must not let the approver see
+// one target while the server acts on another.
+func TestDuplicateQueryValuesMakeResourceUnknown(t *testing.T) {
+	e := builtinEngine(t)
+	v := e.Evaluate(Request{Method: "DELETE", Host: "api.digitalocean.com", Path: "/v2/droplets",
+		Query: "tag_name=scratch&tag_name=prod"})
+	if len(v.Matches) != 1 || v.Matches[0].Resource != "" {
+		t.Fatalf("want held with unknown resource, got %+v", v)
+	}
+	v = e.Evaluate(Request{Method: "DELETE", Host: "api.digitalocean.com", Path: "/v2/droplets",
+		Query: "tag_name=prod&tag_name=prod"})
+	if len(v.Matches) != 1 || v.Matches[0].Resource != "tag:prod" {
+		t.Fatalf("repeated identical values are unambiguous, got %+v", v)
+	}
+}
+
 // LoadDir once built "./x.yaml", which fs.FS rejects: --rules DIR loaded nothing.
 func TestLoadDirReadsUserPacks(t *testing.T) {
 	dir := t.TempDir()

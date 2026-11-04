@@ -262,7 +262,8 @@ func TestObserveModeForwardsWithoutHolding(t *testing.T) {
 
 func TestTimedGrantForwardsOnlyTheGrantedResource(t *testing.T) {
 	h := newHarness(t)
-	grant := approval.Request{Matches: []rules.Match{{RuleID: "test.repo.delete", Resource: "acme/api"}}}
+	grant := approval.Request{Method: "DELETE", URL: "https://127.0.0.1/repos/acme/api",
+		Matches: []rules.Match{{RuleID: "test.repo.delete", Resource: "acme/api"}}}
 	if _, err := h.broker.Grants().AddFor(grant, time.Minute); err != nil {
 		t.Fatal(err)
 	}

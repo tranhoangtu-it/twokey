@@ -79,8 +79,16 @@ func (u uninstaller) untrustOne(tp string) (bool, error) {
 	}
 	home, _ := os.UserHomeDir()
 	keychain := filepath.Join(home, "Library", "Keychains", "login.keychain-db")
-	if _, err := u.run("security", "delete-certificate", "-Z", tp, keychain); err != nil {
-		return false, nil // not in the keychain: nothing to do
+	// Look first, so "not there" is never confused with "could not delete".
+	list, err := u.run("security", "find-certificate", "-a", "-Z", keychain)
+	if err != nil {
+		return false, fmt.Errorf("read login keychain: %v: %s", err, strings.TrimSpace(string(list)))
+	}
+	if !strings.Contains(strings.ToUpper(string(list)), tp) {
+		return false, nil
+	}
+	if out, err := u.run("security", "delete-certificate", "-Z", tp, keychain); err != nil {
+		return false, fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return true, nil
 }
@@ -109,29 +117,64 @@ func (u uninstaller) removeDocker() []string {
 	return removed
 }
 
-// ownsHome reports whether dir looks like a twokey home, so --purge never
-// deletes an unrelated directory that TWOKEY_HOME happens to point at.
-func ownsHome(dir string) bool {
-	if filepath.Base(dir) == ".twokey" {
+// twokeyFiles are the names twokey writes in its home; --purge deletes only
+// these, so a TWOKEY_HOME pointing at a shared directory loses nothing else.
+var twokeyFiles = map[string]bool{
+	"ca.pem": true, "ca-key.pem": true, "ca.lock": true, "bundle.pem": true, "roots.pem": true,
+	"truststore.p12": true, "audit.jsonl": true, phoneTopicFile: true, "twokey.log": true,
+}
+
+func isTwokeyFile(name string) bool {
+	if twokeyFiles[name] {
 		return true
 	}
-	for _, f := range []string{"ca.pem", "audit.jsonl"} {
-		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+	for _, prefix := range []string{"ca.old", "ca-key.old", "ca.pem.", "ca-key.pem."} {
+		if strings.HasPrefix(name, prefix) && (strings.HasSuffix(name, ".pem") || strings.HasSuffix(name, ".tmp")) {
 			return true
 		}
 	}
 	return false
 }
 
-// Run untrusts every CA twokey created, removes strict-mode Docker objects
-// and, with purge, deletes the home directory. Safe to run repeatedly.
-func (u uninstaller) Run() error {
-	if u.purge && !ownsHome(u.home) {
-		return fmt.Errorf("refusing to purge %s: it does not look like a twokey home", u.home)
+// purgeHome deletes twokey's files and its curl config, then the directory
+// if nothing else is left in it.
+func (u uninstaller) purgeHome() error {
+	entries, err := os.ReadDir(u.home)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	thumbprints, err := ca.Thumbprints(u.home)
 	if err != nil {
 		return err
+	}
+	for _, e := range entries {
+		p := filepath.Join(u.home, e.Name())
+		switch {
+		case e.IsDir() && e.Name() == "curl":
+			_ = os.Remove(filepath.Join(p, ".curlrc"))
+			_ = os.Remove(p)
+		case !e.IsDir() && isTwokeyFile(e.Name()):
+			if err := os.Remove(p); err != nil {
+				return err
+			}
+		}
+	}
+	if err := os.Remove(u.home); err != nil {
+		fmt.Fprintf(u.out, "deleted twokey's files; kept %s because it contains other files\n", u.home)
+		return nil
+	}
+	fmt.Fprintln(u.out, "deleted", u.home)
+	return nil
+}
+
+// Run untrusts every CA twokey created, removes strict-mode Docker objects
+// and, with purge, deletes twokey's files. Safe to run repeatedly.
+func (u uninstaller) Run() error {
+	thumbprints, skipped, err := ca.Thumbprints(u.home)
+	if err != nil {
+		return err
+	}
+	for _, s := range skipped {
+		fmt.Fprintf(u.out, "warning: ignored %s: not a twokey CA certificate\n", filepath.Join(u.home, s))
 	}
 	n, untrustErr := u.untrust(thumbprints)
 	docker := u.removeDocker()
@@ -142,11 +185,7 @@ func (u uninstaller) Run() error {
 		return fmt.Errorf("some certificates could not be removed (home kept): %w", untrustErr)
 	}
 	if u.purge {
-		if err := os.RemoveAll(u.home); err != nil {
-			return err
-		}
-		fmt.Fprintln(u.out, "deleted", u.home)
-		return nil
+		return u.purgeHome()
 	}
 	if n == 0 && len(docker) == 0 {
 		fmt.Fprintln(u.out, "nothing to remove (twokey has no OS trust entries or Docker objects here)")
@@ -188,9 +227,12 @@ func cmdCAUntrust() error {
 	if err != nil {
 		return err
 	}
-	thumbprints, err := ca.Thumbprints(home)
+	thumbprints, skipped, err := ca.Thumbprints(home)
 	if err != nil {
 		return err
+	}
+	for _, s := range skipped {
+		fmt.Printf("warning: ignored %s: not a twokey CA certificate\n", filepath.Join(home, s))
 	}
 	u := newUninstaller(home, false)
 	n, err := u.untrust(thumbprints)

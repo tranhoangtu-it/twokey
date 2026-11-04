@@ -132,7 +132,10 @@ func setupDoctor(d setupDeps) error {
 	if err != nil {
 		return err
 	}
-	return d.doctor(p.addr)
+	err = d.doctor(p.addr)
+	cancel()
+	<-p.done // the audit log is closed before setup returns
+	return err
 }
 
 // renderQR prints text as a QR code with half-block characters, light

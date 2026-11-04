@@ -297,7 +297,16 @@ func queryVars(rawQuery string) map[string]string {
 		return vars
 	}
 	for k, vs := range q {
-		if len(vs) > 0 {
+		if len(vs) == 0 {
+			continue
+		}
+		ambiguous := false
+		for _, v := range vs[1:] {
+			ambiguous = ambiguous || v != vs[0]
+		}
+		// ?tag_name=scratch&tag_name=prod: servers differ on which value
+		// wins, so never show the approver one of them as "the" target.
+		if !ambiguous {
 			vars["query."+k] = vs[0]
 		}
 	}

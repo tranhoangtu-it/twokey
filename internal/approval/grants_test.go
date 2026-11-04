@@ -49,6 +49,36 @@ func TestGrantMatchesExactRuleAndResource(t *testing.T) {
 	}
 }
 
+// A grant covers the exact request the human saw: same target and, for
+// SQL, the same statement — not every UPDATE on a table, not another host.
+func TestGrantIsBoundToTargetAndStatement(t *testing.T) {
+	g, _ := newTestGrants()
+	sql := func(target, stmt string) Request {
+		return Request{Method: "SQL", URL: target, Matches: []rules.Match{{
+			RuleID: "postgres.update-without-where", Resource: "users", Message: stmt}}}
+	}
+	if _, err := g.AddFor(sql("postgres dev:5432", "UPDATE users SET last_seen=now()"), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if !g.Covers(sql("postgres dev:5432", "UPDATE users SET last_seen=now()")) {
+		t.Fatal("identical statement must be covered")
+	}
+	if g.Covers(sql("postgres dev:5432", "UPDATE users SET password=''")) {
+		t.Fatal("a different statement on the same table was covered")
+	}
+	if g.Covers(sql("postgres prod:5432", "UPDATE users SET last_seen=now()")) {
+		t.Fatal("the same statement on another database was covered")
+	}
+	other := held("github.repo.delete", "acme/x")
+	other.URL = "https://github.example-enterprise.com/repos/acme/x"
+	if _, err := g.AddFor(held("github.repo.delete", "acme/x"), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if g.Covers(other) {
+		t.Fatal("a grant for one host covered another host")
+	}
+}
+
 func TestGrantExpires(t *testing.T) {
 	g, c := newTestGrants()
 	if _, err := g.AddFor(held("github.repo.delete", "acme/x"), 5*time.Minute); err != nil {

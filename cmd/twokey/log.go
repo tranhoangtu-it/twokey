@@ -25,7 +25,8 @@ type logOptions struct {
 	now      time.Time
 }
 
-// maxAuditLine bounds one audit entry (SQL statements can be long).
+// maxAuditLine is the longest entry `twokey log` shows; longer ones (an
+// agent can send a huge URL) are counted as skipped, not printed.
 const maxAuditLine = 1 << 20
 
 func cmdLog(args []string) error {
@@ -63,33 +64,41 @@ type logLine struct {
 }
 
 func printLog(w io.Writer, r io.Reader, o logOptions) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), maxAuditLine)
+	br := bufio.NewReader(r)
 	var kept []logLine
 	malformed := 0
-	for sc.Scan() {
-		raw := strings.TrimSpace(sc.Text())
-		if raw == "" {
-			continue
+	for {
+		line, err := br.ReadString('\n')
+		if raw := strings.TrimSpace(line); raw != "" {
+			var e audit.Entry
+			switch {
+			case len(raw) > maxAuditLine: // agent-sized URL: skip, don't flood the terminal
+				malformed++
+			case json.Unmarshal([]byte(raw), &e) != nil:
+				malformed++
+			case keepEntry(e, o):
+				kept = append(kept, logLine{raw, e})
+			}
 		}
-		var e audit.Entry
-		if err := json.Unmarshal([]byte(raw), &e); err != nil {
-			malformed++
-			continue
+		if errors.Is(err, io.EOF) {
+			break
 		}
-		if keepEntry(e, o) {
-			kept = append(kept, logLine{raw, e})
+		if err != nil {
+			return err
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return err
 	}
 	if o.n > 0 && len(kept) > o.n {
 		kept = kept[len(kept)-o.n:]
 	}
 	for _, l := range kept {
 		if o.json {
-			fmt.Fprintln(w, l.raw)
+			// Re-encode: encoding/json escapes control characters, so a
+			// tampered log cannot send raw escape sequences to the terminal.
+			out, err := json.Marshal(l.entry)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(w, string(out))
 		} else {
 			fmt.Fprintln(w, formatEntry(l.entry))
 		}

@@ -89,9 +89,9 @@ A desktop notification pops up as well (Windows toast, macOS, `notify-send`; `--
 turn it off) — it only tells you something is waiting; approving still needs the terminal or phone.
 
 **Doing the same cleanup several times?** `approve 3 pr-41-preview --for 15m` also pre-approves
-*exactly that operation on exactly that resource* for up to an hour (`grants` lists them, `revoke 1`
-removes one; they vanish when twokey exits). Unknown resources and requests twokey could not read
-can never be pre-approved.
+*the identical operation* — same rule, same resource, same host or database and, for SQL, the same
+statement — for up to an hour (`grants` lists them, `revoke <id>` removes one; they vanish when
+twokey exits). Unknown resources and requests twokey could not read can never be pre-approved.
 
 Every hold is appended to `~/.twokey/audit.jsonl`; read it with `twokey log`
 (`--denied`, `--provider railway`, `--since 24h`, `--json`).

@@ -11,73 +11,105 @@ import (
 // enough that a forgotten grant expires the same hour.
 const MaxGrant = time.Hour
 
-// Grant pre-approves one exact (rule, resource) pair until Expires.
+// Grant pre-approves one exact operation until Expires: same method and
+// target (host/path or database), same rule, same resource and, for SQL,
+// the same statement. Approving `UPDATE users SET last_seen=now()` must not
+// pre-approve `UPDATE users SET password=''`, nor the same call on another
+// host.
 type Grant struct {
-	RuleID   string
-	Resource string
-	Expires  time.Time
+	ID        int
+	Method    string
+	URL       string
+	RuleID    string
+	Resource  string
+	Statement string // the match message: the SQL text for database guards
+	Expires   time.Time
 }
 
 // Grants holds timed approvals in memory only: they die with the process.
 type Grants struct {
 	mu   sync.Mutex
 	list []Grant
+	next int
 	now  func() time.Time
 }
 
 // NewGrants returns an empty grant set.
 func NewGrants() *Grants { return &Grants{now: time.Now} }
 
-// AddFor grants every match of r for d. Requests twokey could not fully
-// read, or whose resource is unknown, can never be granted: a grant must
-// name exactly what it covers.
-func (g *Grants) AddFor(r Request, d time.Duration) ([]Grant, error) {
+// Check reports why r cannot be granted for d, if it cannot. Requests twokey
+// could not fully read, or whose resource is unknown, are never granted: a
+// grant must name exactly what it covers.
+func (g *Grants) Check(r Request, d time.Duration) error {
 	if d <= 0 || d > MaxGrant {
-		return nil, fmt.Errorf("a timed approval lasts at most %s", MaxGrant)
+		return fmt.Errorf("a timed approval lasts at most %s", MaxGrant)
 	}
 	if r.Uninspectable != "" || len(r.Matches) == 0 {
-		return nil, errors.New("cannot grant a request twokey could not inspect")
+		return errors.New("cannot grant a request twokey could not inspect")
 	}
 	for _, m := range r.Matches {
 		if m.Resource == "" {
-			return nil, errors.New("cannot grant an unknown resource; approve it once instead")
+			return errors.New("cannot grant an unknown resource; approve it once instead")
 		}
+	}
+	return nil
+}
+
+// AddFor grants every match of r for d.
+func (g *Grants) AddFor(r Request, d time.Duration) ([]Grant, error) {
+	if err := g.Check(r, d); err != nil {
+		return nil, err
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	exp := g.now().Add(d)
 	var added []Grant
 	for _, m := range r.Matches {
-		gr := Grant{RuleID: m.RuleID, Resource: m.Resource, Expires: exp}
+		g.next++
+		gr := Grant{ID: g.next, Method: r.Method, URL: r.URL, RuleID: m.RuleID, Resource: m.Resource,
+			Statement: m.Message, Expires: exp}
 		g.list = append(g.list, gr)
 		added = append(added, gr)
 	}
 	return added, nil
 }
 
-// Covers reports whether every match of r is covered by a live grant.
-func (g *Grants) Covers(r Request) bool {
+// Match returns the soonest-expiring grant among those covering r, if every
+// match of r is covered by a live grant.
+func (g *Grants) Match(r Request) (Grant, bool) {
 	if r.Uninspectable != "" || len(r.Matches) == 0 {
-		return false
+		return Grant{}, false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.pruneLocked()
-	for _, m := range r.Matches {
-		if m.Resource == "" || !g.hasLocked(m.RuleID, m.Resource) {
-			return false
+	var first Grant
+	for i, m := range r.Matches {
+		gr, ok := g.findLocked(r, m.RuleID, m.Resource, m.Message)
+		if !ok || m.Resource == "" {
+			return Grant{}, false
+		}
+		if i == 0 || gr.Expires.Before(first.Expires) {
+			first = gr
 		}
 	}
-	return true
+	return first, true
 }
 
-func (g *Grants) hasLocked(rule, resource string) bool {
+// Covers reports whether every match of r is covered by a live grant.
+func (g *Grants) Covers(r Request) bool {
+	_, ok := g.Match(r)
+	return ok
+}
+
+func (g *Grants) findLocked(r Request, rule, resource, statement string) (Grant, bool) {
 	for _, gr := range g.list {
-		if gr.RuleID == rule && gr.Resource == resource {
-			return true
+		if gr.Method == r.Method && gr.URL == r.URL && gr.RuleID == rule &&
+			gr.Resource == resource && gr.Statement == statement {
+			return gr, true
 		}
 	}
-	return false
+	return Grant{}, false
 }
 
 func (g *Grants) pruneLocked() {
@@ -99,14 +131,17 @@ func (g *Grants) List() []Grant {
 	return append([]Grant(nil), g.list...)
 }
 
-// Revoke removes the n-th live grant (1-based, as shown by List).
-func (g *Grants) Revoke(n int) bool {
+// Revoke removes the grant with this ID (IDs are stable: expiry of other
+// grants never renumbers them).
+func (g *Grants) Revoke(id int) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.pruneLocked()
-	if n < 1 || n > len(g.list) {
-		return false
+	for i, gr := range g.list {
+		if gr.ID == id {
+			g.list = append(g.list[:i], g.list[i+1:]...)
+			return true
+		}
 	}
-	g.list = append(g.list[:n-1], g.list[n:]...)
-	return true
+	return false
 }

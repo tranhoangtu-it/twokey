@@ -58,6 +58,26 @@ func TestDesktopCommandsNeverInterpolateRequestText(t *testing.T) {
 	}
 }
 
+func TestDesktopRunsAtMostOneNotificationAtATime(t *testing.T) {
+	d := NewDesktop(func(string, ...any) {})
+	d.goos = "linux"
+	started := make(chan struct{}, 100)
+	release := make(chan struct{})
+	d.run = func(context.Context, []string, []string) error {
+		started <- struct{}{}
+		<-release
+		return nil
+	}
+	for i := 0; i < 50; i++ {
+		d.Notify(evilRequest())
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	if n := len(started); n != 1 {
+		t.Fatalf("a burst of holds started %d notification processes", n)
+	}
+}
+
 func TestDesktopIgnoresObserveAndCloses(t *testing.T) {
 	d := NewDesktop(func(string, ...any) {})
 	calls := 0

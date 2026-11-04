@@ -79,7 +79,8 @@ func (t *Terminal) Notify(r Request) {
 		}
 		fmt.Fprintf(&b, "   %-8s %s  operation=%s  resource=%q\n", strings.ToUpper(m.Severity), m.RuleID, Clean(m.Operation), Clean(res))
 		if m.Message != "" {
-			fmt.Fprintf(&b, "            %s\n", m.Message)
+			// For database guards this is the agent's SQL text: defuse it.
+			fmt.Fprintf(&b, "            %s\n", Clean(m.Message))
 		}
 	}
 	if r.Uninspectable != "" {
@@ -161,14 +162,20 @@ func (t *Terminal) Handle(line string) string {
 	}
 	reason := "approved with typed confirmation"
 	if grantFor > 0 {
-		if _, err := t.broker.Grants().AddFor(req, grantFor); err != nil {
+		if err := t.broker.Grants().Check(req, grantFor); err != nil {
 			return "not approved: " + err.Error()
 		}
-		reason += fmt.Sprintf("; same operation on the same resource pre-approved for %s", grantFor)
+		reason += fmt.Sprintf("; the identical operation is pre-approved for %s", grantFor)
 	}
-	t.broker.Resolve(req.ID, Decision{Approved: true, By: "terminal", Reason: reason})
+	if !t.broker.Resolve(req.ID, Decision{Approved: true, By: "terminal", Reason: reason}) {
+		return fmt.Sprintf("#%s was already decided or timed out; nothing approved or granted", req.ID)
+	}
 	if grantFor > 0 {
-		return fmt.Sprintf("granted for %s: repeats of exactly this operation are auto-approved (see `grants`, `revoke`)", grantFor)
+		added, err := t.broker.Grants().AddFor(req, grantFor)
+		if err != nil {
+			return "approved once, but not granted: " + err.Error()
+		}
+		return fmt.Sprintf("granted for %s (#%d): exact repeats are auto-approved (see `grants`, `revoke <id>`)", grantFor, added[0].ID)
 	}
 	return ""
 }
@@ -191,19 +198,19 @@ func (t *Terminal) listGrants() string {
 		return "no timed approvals"
 	}
 	var b strings.Builder
-	for i, g := range gs {
-		fmt.Fprintf(&b, "%d. %s on %q until %s\n   ", i+1, g.RuleID, Clean(g.Resource), g.Expires.Format(time.TimeOnly))
+	for _, g := range gs {
+		fmt.Fprintf(&b, "#%d  %s on %q at %s until %s\n   ", g.ID, g.RuleID, Clean(g.Resource), Clean(g.URL), g.Expires.Format(time.TimeOnly))
 	}
 	return strings.TrimSpace(b.String())
 }
 
 func (t *Terminal) revoke(args []string) string {
-	if len(args) != 1 || !isNumber(args[0]) {
-		return "usage: revoke <n> (see `grants`)"
+	if len(args) != 1 || !isNumber(strings.TrimPrefix(args[0], "#")) {
+		return "usage: revoke <id> (see `grants`)"
 	}
-	n, _ := strconv.Atoi(args[0])
-	if !t.broker.Grants().Revoke(n) {
-		return "no such grant"
+	id, _ := strconv.Atoi(strings.TrimPrefix(args[0], "#"))
+	if !t.broker.Grants().Revoke(id) {
+		return "no such grant (it may have expired)"
 	}
 	return "revoked"
 }

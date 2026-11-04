@@ -38,11 +38,14 @@ type Desktop struct {
 	run  func(ctx context.Context, argv, env []string) error
 	logf func(string, ...any)
 	once sync.Once
+	// busy allows one notification process at a time: a burst of holds
+	// (which the agent controls) must not spawn a process per request.
+	busy chan struct{}
 }
 
 // NewDesktop returns a desktop notifier for this OS.
 func NewDesktop(logf func(string, ...any)) *Desktop {
-	return &Desktop{goos: runtime.GOOS, run: runCommand, logf: logf}
+	return &Desktop{goos: runtime.GOOS, run: runCommand, logf: logf, busy: make(chan struct{}, 1)}
 }
 
 func runCommand(ctx context.Context, argv, env []string) error {
@@ -61,7 +64,13 @@ func (d *Desktop) Notify(r Request) {
 	if len(argv) == 0 {
 		return
 	}
+	select {
+	case d.busy <- struct{}{}:
+	default:
+		return // one is already on screen; the terminal and phone list them all
+	}
 	go func() {
+		defer func() { <-d.busy }()
 		ctx, cancel := context.WithTimeout(context.Background(), desktopTimeout)
 		defer cancel()
 		if err := d.run(ctx, argv, env); err != nil {

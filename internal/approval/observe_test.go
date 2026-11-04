@@ -44,6 +44,27 @@ func TestObserveModeApprovesImmediatelyAndNeverPrompts(t *testing.T) {
 	}
 }
 
+func TestCleanDefusesTerminalAndBidiControls(t *testing.T) {
+	for _, s := range []string{"\x1b[2J", "a\rb", "x‮y", "x y", "x⁦y"} {
+		if c := Clean(s); c == s || strings.ContainsAny(c, "\x1b\r‮ ⁦") {
+			t.Errorf("Clean(%q) = %q", s, c)
+		}
+	}
+}
+
+func TestTerminalCleansStatementText(t *testing.T) {
+	var out strings.Builder
+	b := NewBroker(time.Hour)
+	term := NewTerminal(b, &out)
+	term.Notify(Request{ID: "1", Method: "SQL", URL: "postgres db:5432", Matches: []rules.Match{{
+		RuleID: "postgres.drop-table", Operation: "DROP TABLE", Resource: "x",
+		Message: "DROP TABLE x; \x1b[2J\x1b[Hfake prompt"}}})
+	term.Flush()
+	if strings.Contains(out.String(), "\x1b") {
+		t.Fatalf("escape sequence reached the approver's terminal: %q", out.String())
+	}
+}
+
 func TestObserveLogIgnoresRealHolds(t *testing.T) {
 	var out bytes.Buffer
 	l := NewObserveLog(&out)

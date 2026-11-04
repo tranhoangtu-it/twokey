@@ -54,6 +54,28 @@ func TestLogFilters(t *testing.T) {
 	}
 }
 
+// One huge entry (a long URL from the agent) must not make the log unreadable.
+func TestLogSurvivesOversizedLines(t *testing.T) {
+	huge := `{"time":"2026-11-04T09:59:00Z","id":"9","method":"DELETE","url":"https://api.github.com/` +
+		strings.Repeat("a", maxAuditLine+10) + `","approved":false,"by":"timeout","reason":"x"}`
+	var out bytes.Buffer
+	err := printLog(&out, strings.NewReader(sampleAudit+huge+"\n"), logOptions{n: 20, now: logNow})
+	if err != nil || !strings.Contains(out.String(), "acme/x") {
+		t.Fatalf("err=%v out=%s", err, out.String())
+	}
+}
+
+func TestLogJSONEscapesControlCharacters(t *testing.T) {
+	tampered := `{"time":"2026-11-04T09:59:00Z","id":"9","method":"DELETE","url":"x` + "\x1b" + `[2J","approved":false,"by":"timeout","reason":"x"}` + "\n"
+	var out bytes.Buffer
+	if err := printLog(&out, strings.NewReader(tampered), logOptions{n: 20, json: true, now: logNow}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\x1b") {
+		t.Fatalf("raw escape reached the terminal: %q", out.String())
+	}
+}
+
 func TestLogJSONRoundTrips(t *testing.T) {
 	out := runLog(t, logOptions{n: 20, json: true, provider: "github"})
 	lines := strings.Split(strings.TrimSpace(out), "\n")

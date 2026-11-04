@@ -60,11 +60,28 @@ func (r Request) ConfirmText() string {
 // defused) in request-derived strings before they are shown to a human.
 func Clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || isLayoutControl(r) {
 			return '?'
 		}
 		return r
 	}, s)
+}
+
+// isLayoutControl reports Unicode characters that reorder or break the
+// displayed text (bidi overrides/isolates, line and paragraph separators),
+// which could make a resource name look like something else.
+func isLayoutControl(r rune) bool {
+	switch {
+	case r == 0x200e, r == 0x200f, r == 0x061c: // LRM, RLM, ALM
+		return true
+	case r >= 0x202a && r <= 0x202e: // embeddings and overrides
+		return true
+	case r >= 0x2066 && r <= 0x2069: // isolates
+		return true
+	case r == 0x2028, r == 0x2029: // line / paragraph separator
+		return true
+	}
+	return false
 }
 
 // NormalizeSpace collapses runs of whitespace to single spaces.
@@ -154,8 +171,8 @@ func (b *Broker) Decide(ctx context.Context, req Request) (Request, Decision) {
 	if b.observe.Load() {
 		return req, b.observed(req)
 	}
-	if b.grants.Covers(req) {
-		return req, b.granted(req)
+	if g, ok := b.grants.Match(req); ok {
+		return req, b.granted(req, g)
 	}
 	e := &entry{req: req, ch: make(chan Decision, 1)}
 
@@ -198,8 +215,9 @@ func (b *Broker) observed(req Request) Decision {
 	return Decision{Approved: true, By: "observe", Reason: "observe mode: would have been held, forwarded unprotected"}
 }
 
-func (b *Broker) granted(req Request) Decision {
-	d := Decision{Approved: true, By: "grant", Reason: "covered by a timed approval"}
+func (b *Broker) granted(req Request, g Grant) Decision {
+	d := Decision{Approved: true, By: "grant",
+		Reason: fmt.Sprintf("covered by timed approval #%d (until %s)", g.ID, g.Expires.Format(time.TimeOnly))}
 	b.mu.Lock()
 	notifiers := append([]Notifier(nil), b.notifiers...)
 	b.mu.Unlock()

@@ -66,12 +66,12 @@ func TestUntrustRejectsMalformedThumbprint(t *testing.T) {
 }
 
 func TestUntrustDarwinUsesSHA1Flag(t *testing.T) {
-	f := &fakeRunner{}
+	f := &fakeRunner{answers: map[string]string{"security find-certificate": "SHA-1 hash: " + tpA + "\n"}}
 	u := uninstaller{goos: "darwin", run: f.run, out: &bytes.Buffer{}}
-	if _, err := u.untrust([]string{tpA}); err != nil {
-		t.Fatal(err)
+	if n, err := u.untrust([]string{tpA}); err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
 	}
-	if len(f.calls) != 1 || !strings.HasPrefix(f.calls[0], "security delete-certificate -Z "+tpA+" ") {
+	if len(f.calls) != 2 || !strings.HasPrefix(f.calls[1], "security delete-certificate -Z "+tpA+" ") {
 		t.Fatalf("calls=%v", f.calls)
 	}
 }
@@ -134,18 +134,47 @@ func TestPurgeDeletesTwokeyHome(t *testing.T) {
 	}
 }
 
-func TestPurgeRefusesForeignDirectory(t *testing.T) {
+// TWOKEY_HOME may point at a directory with other content: purge deletes
+// only the files twokey writes and keeps the directory if anything is left.
+func TestPurgeDeletesOnlyTwokeyFiles(t *testing.T) {
 	home := t.TempDir()
+	if _, _, err := ca.LoadOrCreate(home); err != nil {
+		t.Fatal(err)
+	}
 	keep := filepath.Join(home, "important.txt")
 	if err := os.WriteFile(keep, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeRunner{fail: map[string]bool{"docker": true}}
 	u := uninstaller{home: home, goos: "linux", run: f.run, out: &bytes.Buffer{}, purge: true}
-	if err := u.Run(); err == nil {
-		t.Fatal("purge of a directory twokey does not own must fail")
+	if err := u.Run(); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(keep); err != nil {
-		t.Fatal("foreign file was deleted")
+		t.Fatal("a file twokey did not write was deleted")
+	}
+	for _, name := range []string{"ca.pem", "ca-key.pem"} {
+		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
+			t.Fatalf("%s not purged", name)
+		}
+	}
+}
+
+func TestUntrustDarwinReportsRealFailures(t *testing.T) {
+	present := map[string]string{"security find-certificate": "SHA-1 hash: " + tpA + "\n"}
+	f := &fakeRunner{answers: present, fail: map[string]bool{"security delete-certificate": true}}
+	u := uninstaller{goos: "darwin", run: f.run, out: &bytes.Buffer{}}
+	if _, err := u.untrust([]string{tpA}); err == nil {
+		t.Fatal("a failed keychain deletion was reported as success")
+	}
+	f = &fakeRunner{answers: map[string]string{"security find-certificate": "SHA-1 hash: 0000\n"}}
+	u.run = f.run
+	if n, err := u.untrust([]string{tpA}); err != nil || n != 0 {
+		t.Fatalf("absent certificate must be a no-op: n=%d err=%v", n, err)
+	}
+	for _, c := range f.calls {
+		if strings.Contains(c, "delete-certificate") {
+			t.Fatal("tried to delete a certificate that is not in the keychain")
+		}
 	}
 }

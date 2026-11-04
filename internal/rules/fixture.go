@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -171,7 +171,7 @@ func CheckFixture(e *Engine, f Fixture) []string {
 func CheckFixtureDir(e *Engine, fsys fs.FS, ids []string) []FixtureFailure {
 	var fails []FixtureFailure
 	want := map[string]bool{}
-	sort.Strings(ids)
+	ids = slices.Sorted(slices.Values(ids)) // don't reorder the caller's slice
 	for _, id := range ids {
 		want[id] = true
 		data, err := fs.ReadFile(fsys, id+".http")
@@ -188,7 +188,10 @@ func CheckFixtureDir(e *Engine, fsys fs.FS, ids []string) []FixtureFailure {
 			fails = append(fails, FixtureFailure{id, p})
 		}
 	}
-	files, _ := fs.Glob(fsys, "*.http")
+	files, err := fs.Glob(fsys, "*.http")
+	if err != nil {
+		fails = append(fails, FixtureFailure{"(fixtures)", err.Error()})
+	}
 	for _, name := range files {
 		if id := strings.TrimSuffix(name, ".http"); !want[id] {
 			fails = append(fails, FixtureFailure{id, "fixture for an unknown rule"})

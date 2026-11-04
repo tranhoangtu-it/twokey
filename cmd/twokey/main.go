@@ -344,9 +344,9 @@ func cmdCA(args []string) error {
 		if err := ca.Reset(home); err != nil {
 			return err
 		}
-		fmt.Println("CA removed from", home, "— a new one is created on the next `twokey up`.")
+		fmt.Println("CA retired in", home, "— every private key is deleted; a new CA is created on the next `twokey up`.")
 		if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-			fmt.Println("If you ran `twokey ca trust`, remove the old \"twokey local CA\" from your OS trust store and trust the new one.")
+			fmt.Println("If you ran `twokey ca trust`: `twokey ca untrust` removes the old CA (its certificate was kept for that), then trust the new one.")
 		}
 		return nil
 	}
