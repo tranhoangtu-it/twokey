@@ -66,6 +66,27 @@ func TestCurlHomeKeepsUserConfigAndAddsRevokeBestEffort(t *testing.T) {
 	}
 }
 
+func TestStrictRunArgs(t *testing.T) {
+	args := strings.Join(strictRunArgs("node:22", "/proj", "/h/.twokey", "7171", true, false,
+		[]string{"claude", "--yes"}), " ")
+	for _, want := range []string{
+		"--network " + strictNetwork, "-i", "/proj:/work", "-w /work",
+		"HTTPS_PROXY=http://twokey-gw-7171:7171", "/twokey/ca.pem:ro", "node:22 claude --yes",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing %q in: %s", want, args)
+		}
+	}
+	for _, secret := range []string{"ca-key.pem", "ntfy-topic"} {
+		if strings.Contains(args, secret) {
+			t.Fatalf("%s must never be mounted into the agent container: %s", secret, args)
+		}
+	}
+	if strings.Contains(args, " -t ") {
+		t.Error("no TTY flag when not attached to a terminal")
+	}
+}
+
 func TestPhoneTopicIsPersistentAndPrivate(t *testing.T) {
 	dir := t.TempDir()
 	t1, err := phoneTopic(dir, false)

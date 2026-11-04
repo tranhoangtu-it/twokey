@@ -84,9 +84,10 @@ Every hold is appended to `~/.twokey/audit.jsonl`.
 
 ## What's covered
 
-`twokey rules` lists all 44 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
-Lambda, EKS, Secrets Manager, ECR, Route 53), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
-Fly.io, Cloudflare and DigitalOcean. Rules are small YAML files:
+`twokey rules` lists all 61 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
+Lambda, EKS, Secrets Manager, ECR, Route 53), Google Cloud (Storage, Cloud SQL, Compute,
+projects), Azure (resource groups and resources), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
+Fly.io, Cloudflare, DigitalOcean, Heroku, Render, Netlify, PlanetScale, Turso and MongoDB Atlas. Rules are small YAML files:
 
 ```yaml
 - id: railway.volume.delete
@@ -117,14 +118,20 @@ allow:
 Every entry needs an explicit `resource` (`"*"` to allow all); uninspectable requests are never
 pre-approved.
 
-## Guard a Postgres database
+## Guard a database (Postgres, MySQL)
 
 Agents often talk to the database directly. Put twokey in between:
 
 ```sh
 twokey pg --upstream db.internal:5432 --upstream-tls   # listens on 127.0.0.1:6543
 DATABASE_URL=postgres://user:pass@127.0.0.1:6543/app?sslmode=disable twokey run -- claude
+
+twokey mysql --upstream 127.0.0.1:3306                 # listens on 127.0.0.1:3307
 ```
+
+MySQL notes: the local hop is plaintext (TLS to the upstream is not supported yet — run the
+guard next to the database or through an SSH tunnel). With `caching_sha2_password` over
+plaintext, clients may need `--get-server-public-key` for the first login.
 
 `DROP …`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE` and `ALTER TABLE … DROP` are held —
 in simple and extended (prepared-statement) protocol, ignoring look-alikes inside strings,
@@ -166,18 +173,33 @@ held — it fails closed.
 `explain`: 0 = passes, 2 = would be held. `run`: the agent's exit status, or 125 if twokey itself
 failed (e.g. no proxy running).
 
+## Strict mode: no way around the guard
+
+```sh
+twokey up                                              # terminal 1 (or add --phone below)
+twokey run --strict --image node:22 -- npx @anthropic-ai/claude-code
+```
+
+The agent runs in a Docker container on an `--internal` network with no route to the internet.
+Its only way out is a tiny gateway container that forwards to twokey on your machine — so unsetting
+`HTTPS_PROXY`, raw sockets or a stray SDK simply have nowhere to go. The project directory is
+mounted at `/work`; only the CA certificate and trust bundles are mounted, never the CA key or the
+phone topic. Requires Docker (Docker Desktop on Windows/macOS).
+
 ## Threat model — read this
 
-twokey protects you from **accidents**: an agent that guesses wrong, misreads an environment,
-or "cleans up" the wrong thing. It is **not** a sandbox against a deliberately malicious agent,
-which runs as your user and could unset `HTTPS_PROXY` or read `~/.twokey`. For that, run the agent
-in a container/VM whose only network egress is twokey. Also: scope your cloud tokens and keep
-backups somewhere a single API call can't reach. See [SECURITY.md](SECURITY.md).
+By default twokey protects you from **accidents**: an agent that guesses wrong, misreads an
+environment, or "cleans up" the wrong thing. Without `--strict` it is **not** a sandbox against a
+deliberately malicious agent, which runs as your user and could unset `HTTPS_PROXY` or read
+`~/.twokey` — use `--strict` for that. Either way: scope your cloud tokens and keep backups
+somewhere a single API call can't reach. See [SECURITY.md](SECURITY.md).
+
+Upgrading: when a release adds providers, twokey creates a new local CA (the old one is kept as
+`~/.twokey/ca.old.pem`). If you used `twokey ca trust`, run it again.
 
 ## Roadmap
 
-`--strict` sandbox mode (agent in a container whose only egress is twokey) · MySQL guard ·
-more providers.
+MySQL TLS to the upstream · Kubernetes API rules · more providers (PRs welcome).
 
 ## License
 

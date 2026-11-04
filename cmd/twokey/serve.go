@@ -155,6 +155,8 @@ func cmdRun(args []string) error {
 	timeout := fs.Duration("timeout", 2*time.Minute, "with --phone: deny holds nobody answers within this time")
 	rulesDir := fs.String("rules", "", "with --phone: extra rule pack directory")
 	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+")")
+	strict := fs.Bool("strict", false, "run the agent in a Docker container whose only network egress is twokey")
+	image := fs.String("image", "", "with --strict: container image that contains the agent")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -195,6 +197,9 @@ func cmdRun(args []string) error {
 			"or use one terminal with phone approvals:   twokey run --phone -- %s", err, argv[0]))
 	}
 
+	if *strict {
+		return runStrict(proxyAddr, *image, argv)
+	}
 	vars, err := agentEnv(proxyAddr)
 	if err != nil {
 		return setupFailure(err)
