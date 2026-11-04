@@ -1,0 +1,17 @@
+provider: hetzner
+docs: https://docs.hetzner.cloud/
+rules:
+  - id: hetzner.server.delete
+    hosts: [api.hetzner.cloud]
+    methods: [DELETE]
+    path: /v1/servers/{server}
+    resource: "{server}"
+    severity: critical
+    message: Deletes a Hetzner Cloud server.
+  - id: hetzner.volume.delete
+    hosts: [api.hetzner.cloud]
+    methods: [DELETE]
+    path: /v1/volumes/{volume}
+    resource: "{volume}"
+    severity: critical
+    message: Deletes a Hetzner Cloud volume and its data.

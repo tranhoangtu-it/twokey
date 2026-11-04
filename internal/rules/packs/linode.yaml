@@ -1,0 +1,17 @@
+provider: linode
+docs: https://techdocs.akamai.com/linode-api/reference/api
+rules:
+  - id: linode.instance.delete
+    hosts: [api.linode.com]
+    methods: [DELETE]
+    path: /v4/linode/instances/{instance}
+    resource: "{instance}"
+    severity: critical
+    message: Deletes a Linode instance.
+  - id: linode.volume.delete
+    hosts: [api.linode.com]
+    methods: [DELETE]
+    path: /v4/volumes/{volume}
+    resource: "{volume}"
+    severity: critical
+    message: Deletes a Linode block storage volume.

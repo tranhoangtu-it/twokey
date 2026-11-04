@@ -84,10 +84,11 @@ Every hold is appended to `~/.twokey/audit.jsonl`.
 
 ## What's covered
 
-`twokey rules` lists all 61 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
+`twokey rules` lists all 68 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
 Lambda, EKS, Secrets Manager, ECR, Route 53), Google Cloud (Storage, Cloud SQL, Compute,
 projects), Azure (resource groups and resources), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
-Fly.io, Cloudflare, DigitalOcean, Heroku, Render, Netlify, PlanetScale, Turso and MongoDB Atlas. Rules are small YAML files:
+Fly.io, Cloudflare (incl. Pages), DigitalOcean, Heroku, Render, Netlify, PlanetScale, Turso,
+MongoDB Atlas, Hetzner, Linode, Vultr and Upstash. Rules are small YAML files:
 
 ```yaml
 - id: railway.volume.delete
@@ -126,12 +127,14 @@ Agents often talk to the database directly. Put twokey in between:
 twokey pg --upstream db.internal:5432 --upstream-tls   # listens on 127.0.0.1:6543
 DATABASE_URL=postgres://user:pass@127.0.0.1:6543/app?sslmode=disable twokey run -- claude
 
-twokey mysql --upstream 127.0.0.1:3306                 # listens on 127.0.0.1:3307
+twokey mysql --upstream db.internal:3306 --upstream-tls  # listens on 127.0.0.1:3307
 ```
 
-MySQL notes: the local hop is plaintext (TLS to the upstream is not supported yet — run the
-guard next to the database or through an SSH tunnel). With `caching_sha2_password` over
-plaintext, clients may need `--get-server-public-key` for the first login.
+The local hop between agent and guard is plaintext (that is what lets twokey read it); the hop to
+the database can use TLS: `--upstream-tls` verifies the server certificate, while
+`--upstream-tls-skip-verify` only encrypts (like `sslmode=require`, e.g. for self-signed certs).
+With MySQL `caching_sha2_password` and a plaintext upstream, clients may need
+`--get-server-public-key` for the first login.
 
 `DROP …`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE` and `ALTER TABLE … DROP` are held —
 in simple and extended (prepared-statement) protocol, ignoring look-alikes inside strings,
@@ -165,6 +168,9 @@ held — it fails closed.
 - **JVM:** `twokey run` sets `JAVA_TOOL_OPTIONS` (proxy properties + a PKCS#12 truststore with
   the twokey CA), which covers `HttpURLConnection` and SDKs that honor the standard proxy
   properties. `twokey doctor` checks it when `java` is installed.
+- **Kubernetes:** not intercepted on purpose. `kubectl` trusts only the CA in your kubeconfig
+  and often authenticates with client certificates, so a TLS-intercepting proxy would break it.
+  Use `--strict` plus RBAC/admission policies for clusters.
 - **Not covered:** clients that ignore proxy settings entirely. Between the agent and twokey,
   intercepted hosts speak HTTP/1.1 (HTTP/2-only clients such as gRPC are not supported there).
 
@@ -199,7 +205,7 @@ Upgrading: when a release adds providers, twokey creates a new local CA (the old
 
 ## Roadmap
 
-MySQL TLS to the upstream · Kubernetes API rules · more providers (PRs welcome).
+More providers and rules — PRs welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## License
 
