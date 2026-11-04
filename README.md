@@ -230,7 +230,8 @@ deliberately malicious agent, which runs as your user and could unset `HTTPS_PRO
 somewhere a single API call can't reach. See [SECURITY.md](SECURITY.md).
 
 Upgrading: when a release adds providers, twokey creates a new local CA (old ones are kept as
-`~/.twokey/ca.old.*.pem`). If you used `twokey ca trust`, run it again.
+`~/.twokey/ca.old.*.pem`). If you used `twokey ca trust`, run it again (`twokey setup --yes --trust`
+does it), then `twokey ca untrust --retired` to remove the old CAs from the OS store.
 
 Uninstalling: `twokey uninstall` removes every twokey CA from the OS trust store (by exact
 thumbprint) and any strict-mode Docker objects; add `--purge` to delete `~/.twokey` too.

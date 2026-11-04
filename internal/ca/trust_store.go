@@ -53,6 +53,20 @@ func Thumbprints(dir string) (thumbprints, skipped []string, err error) {
 	return thumbprints, skipped, nil
 }
 
+// CurrentThumbprint returns the thumbprint of the CA twokey uses now
+// (ca.pem); ok is false when there is none yet.
+func CurrentThumbprint(dir string) (tp string, ok bool, err error) {
+	data, err := os.ReadFile(filepath.Join(dir, certFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	tp, ok = twokeyThumbprint(data)
+	return tp, ok, nil
+}
+
 // twokeyThumbprint returns the thumbprint of a PEM certificate that is a
 // self-signed CA issued to organization "twokey".
 func twokeyThumbprint(data []byte) (string, bool) {

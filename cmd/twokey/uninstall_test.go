@@ -76,6 +76,34 @@ func TestUntrustDarwinUsesSHA1Flag(t *testing.T) {
 	}
 }
 
+// After an upgrade rotates the CA, --retired removes the old CAs from the
+// OS store but keeps the one twokey uses now.
+func TestUntrustRetiredKeepsTheCurrentCA(t *testing.T) {
+	home := t.TempDir()
+	for i := 0; i < 3; i++ {
+		if _, _, err := ca.LoadOrCreate(home); err != nil {
+			t.Fatal(err)
+		}
+		if i < 2 {
+			if err := ca.Rotate(home); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	current, _, _ := ca.CurrentThumbprint(home)
+	f := &fakeRunner{answers: map[string]string{"powershell": "removed"}}
+	u := uninstaller{home: home, goos: "windows", run: f.run, out: &bytes.Buffer{}}
+	n, err := u.untrustRetired()
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	for _, c := range f.calls {
+		if strings.Contains(c, current) {
+			t.Fatalf("removed the current CA: %s", c)
+		}
+	}
+}
+
 func TestUntrustLinuxChangesNothing(t *testing.T) {
 	f := &fakeRunner{}
 	u := uninstaller{goos: "linux", run: f.run, out: &bytes.Buffer{}}

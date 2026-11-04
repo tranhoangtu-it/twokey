@@ -116,10 +116,20 @@ func setupTrust(w io.Writer, in io.Reader, o setupOptions, d setupDeps, certPath
 		fmt.Fprintln(w, "2. OS trust: skipped (run `twokey ca trust` later; `twokey uninstall` removes it).")
 		return nil
 	}
+	if o.trust {
+		fmt.Fprintln(w, "2. OS trust: adding the twokey CA to your user trust store (no admin).")
+	}
 	if err := d.trust(certPath); err != nil {
 		return fmt.Errorf("trust CA: %w", err)
 	}
 	fmt.Fprintln(w, "   trusted — `twokey ca untrust` or `twokey uninstall` removes it.")
+	if home, err := homeDir(); err == nil {
+		u := newUninstaller(home, false)
+		u.out = io.Discard
+		if old, err := u.retiredThumbprints(); err == nil && len(old) > 0 {
+			fmt.Fprintf(w, "   %d older twokey CA(s) from before an upgrade may still be trusted: `twokey ca untrust --retired` removes them.\n", len(old))
+		}
+	}
 	return nil
 }
 
