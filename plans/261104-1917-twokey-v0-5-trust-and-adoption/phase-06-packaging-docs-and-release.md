@@ -32,5 +32,10 @@ One-command install on every OS and a release documenting the new trust story.
 - [ ] Formula + scoop manifest published on tag
 - [ ] Scoop install verified live on Windows
 
+## Progress (2026-11-04)
+- Done: goreleaser `homebrew_casks` + `scoops` (skipped until `TAP_GITHUB_TOKEN` exists), CI `goreleaser check` job, README/SECURITY/CONTRIBUTING, PR #8.
+- Waiting on maintainer: create the two repos + secret, merge PR #8, tag `v0.5.0`; then verify Scoop install.
+- Local `goreleaser check` was blocked by the session's permission classifier; CI runs it instead.
+
 ## Risk Assessment
 Missing token/repos → release job fails on taps; mitigated by `skip_upload: auto` and documented one-time setup.
