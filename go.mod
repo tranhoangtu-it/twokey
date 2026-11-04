@@ -1,6 +1,6 @@
 module github.com/tranhoangtu-it/twokey
 
-go 1.26.0
+go 1.26.10
 
 require (
 	github.com/vektah/gqlparser/v2 v2.5.64
