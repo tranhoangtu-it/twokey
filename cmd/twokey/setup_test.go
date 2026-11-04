@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tranhoangtu-it/twokey/internal/ca"
 )
 
 type setupFakes struct {
@@ -66,6 +68,29 @@ func TestSetupPromptsBeforeTrusting(t *testing.T) {
 	}
 	if len(f.trusted) != 0 {
 		t.Fatal("the default answer must be no")
+	}
+}
+
+func TestSetupTrustShowsStepAndSuggestsRetiringOldCAs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("TWOKEY_HOME", home)
+	if _, _, err := ca.LoadOrCreate(home); err != nil {
+		t.Fatal(err)
+	}
+	if err := ca.Rotate(home); err != nil { // as an upgrade would
+		t.Fatal(err)
+	}
+	f := &setupFakes{}
+	var out bytes.Buffer
+	o := setupOptions{trust: true, yes: true, goos: "windows", noPhone: true, noDoctor: true}
+	if err := runSetup(&out, strings.NewReader(""), o, f.deps()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "2. OS trust") {
+		t.Fatalf("step 2 label missing:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "twokey ca untrust --retired") {
+		t.Fatalf("retired CAs not mentioned:\n%s", out.String())
 	}
 }
 

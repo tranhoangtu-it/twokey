@@ -56,6 +56,26 @@ func TestThumbprintsIncludeRotatedCAs(t *testing.T) {
 	}
 }
 
+func TestCurrentThumbprintIsTheLiveCA(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok, err := CurrentThumbprint(dir); ok || err != nil {
+		t.Fatalf("no CA yet: ok=%v err=%v", ok, err)
+	}
+	if _, _, err := LoadOrCreate(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := Rotate(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadOrCreate(dir); err != nil {
+		t.Fatal(err)
+	}
+	tp, ok, err := CurrentThumbprint(dir)
+	if err != nil || !ok || tp != pemThumbprint(t, filepath.Join(dir, certFile)) {
+		t.Fatalf("tp=%s ok=%v err=%v", tp, ok, err)
+	}
+}
+
 func TestThumbprintsEmptyDirIsNotAnError(t *testing.T) {
 	got, _, err := Thumbprints(t.TempDir())
 	if err != nil || len(got) != 0 {

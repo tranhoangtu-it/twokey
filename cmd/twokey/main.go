@@ -63,7 +63,8 @@ Usage:
   twokey explain --method M --url U [-H k:v] [--data D] would this request be held?
   twokey rules [--rules DIR]                           list destructive-operation rules
   twokey rules test --rules DIR [--fixtures DIR]       check your rules against .http fixtures
-  twokey ca init|path|trust|untrust|reset              manage the local CA
+  twokey ca init|path|trust|reset                      manage the local CA
+  twokey ca untrust [--retired]                        remove twokey CAs (or only old ones) from the OS store
   twokey uninstall [--purge]                           remove OS trust + Docker objects (and ~/.twokey)
   twokey version
 
@@ -175,7 +176,8 @@ func loadAuthority(engine *rules.Engine) (*ca.Authority, bool, error) {
 			return nil, false, fmt.Errorf("%v (and rotating it failed: %w)", err, rerr)
 		}
 		fmt.Fprintln(os.Stderr, "twokey: rule packs now cover more domains, so a new local CA was created "+
-			"(the old one is kept so `twokey ca untrust` can remove it). If you used `twokey ca trust`, run it again.")
+			"(the old one is kept so it can be removed). If you used `twokey ca trust`: run it again, "+
+			"then `twokey ca untrust --retired` to drop the old one.")
 		return ca.LoadOrCreate(home, engine.Domains()...)
 	}
 	if err == nil && !created {
@@ -321,7 +323,7 @@ func cmdCA(args []string) error {
 		return errors.New("usage: twokey ca init|path|trust|untrust|reset")
 	}
 	if args[0] == "untrust" {
-		return cmdCAUntrust()
+		return cmdCAUntrust(args[1:])
 	}
 	if args[0] == "path" {
 		// Report only; never create a CA (key material) as a side effect.

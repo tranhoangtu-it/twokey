@@ -169,12 +169,9 @@ func (u uninstaller) purgeHome() error {
 // Run untrusts every CA twokey created, removes strict-mode Docker objects
 // and, with purge, deletes twokey's files. Safe to run repeatedly.
 func (u uninstaller) Run() error {
-	thumbprints, skipped, err := ca.Thumbprints(u.home)
+	thumbprints, err := u.thumbprints()
 	if err != nil {
 		return err
-	}
-	for _, s := range skipped {
-		fmt.Fprintf(u.out, "warning: ignored %s: not a twokey CA certificate\n", filepath.Join(u.home, s))
 	}
 	n, untrustErr := u.untrust(thumbprints)
 	docker := u.removeDocker()
@@ -221,23 +218,67 @@ func executablePath() string {
 	return p
 }
 
-// cmdCAUntrust removes every CA twokey created from the OS trust store.
-func cmdCAUntrust() error {
+// cmdCAUntrust removes twokey CAs from the OS trust store: all of them, or
+// with --retired only those replaced by a rotation (after an upgrade).
+func cmdCAUntrust(args []string) error {
+	fs := flag.NewFlagSet("ca untrust", flag.ContinueOnError)
+	retired := fs.Bool("retired", false, "remove only old CAs, keep the one twokey uses now")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	home, err := homeDir()
 	if err != nil {
 		return err
 	}
-	thumbprints, skipped, err := ca.Thumbprints(home)
-	if err != nil {
-		return err
-	}
-	for _, s := range skipped {
-		fmt.Printf("warning: ignored %s: not a twokey CA certificate\n", filepath.Join(home, s))
-	}
 	u := newUninstaller(home, false)
-	n, err := u.untrust(thumbprints)
+	var n int
+	if *retired {
+		n, err = u.untrustRetired()
+	} else {
+		var thumbprints []string
+		if thumbprints, err = u.thumbprints(); err == nil {
+			n, err = u.untrust(thumbprints)
+		}
+	}
 	if n == 0 && err == nil {
-		fmt.Println("no twokey CA in the OS trust store")
+		fmt.Println("nothing to remove from the OS trust store")
 	}
 	return err
+}
+
+// thumbprints lists twokey's CAs in the home, warning about skipped files.
+func (u uninstaller) thumbprints() ([]string, error) {
+	tps, skipped, err := ca.Thumbprints(u.home)
+	for _, s := range skipped {
+		fmt.Fprintf(u.out, "warning: ignored %s: not a twokey CA certificate\n", filepath.Join(u.home, s))
+	}
+	return tps, err
+}
+
+// retiredThumbprints are twokey's CAs other than the current one.
+func (u uninstaller) retiredThumbprints() ([]string, error) {
+	all, err := u.thumbprints()
+	if err != nil {
+		return nil, err
+	}
+	current, _, err := ca.CurrentThumbprint(u.home)
+	if err != nil {
+		return nil, err
+	}
+	var old []string
+	for _, tp := range all {
+		if tp != current {
+			old = append(old, tp)
+		}
+	}
+	return old, nil
+}
+
+// untrustRetired removes the old CAs a rotation left in the OS trust store.
+func (u uninstaller) untrustRetired() (int, error) {
+	old, err := u.retiredThumbprints()
+	if err != nil {
+		return 0, err
+	}
+	return u.untrust(old)
 }
