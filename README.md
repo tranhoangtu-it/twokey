@@ -151,8 +151,8 @@ allow:
     resource: "test_*"
 ```
 
-Every entry needs an explicit `resource` (`"*"` to allow all); uninspectable requests are never
-pre-approved.
+Every entry needs an explicit `resource` (`"*"` matches any named resource). Requests twokey
+could not read, and requests whose resource it could not determine, are never pre-approved.
 
 The project directory is where the agent works, so the agent (or a repo you cloned) can write this
 file. twokey therefore ignores `./.twokey-allow.yaml` until you have reviewed it and run:
@@ -184,10 +184,15 @@ the database can use TLS: `--upstream-tls` verifies the server certificate, whil
 With MySQL `caching_sha2_password` and a plaintext upstream, clients may need
 `--get-server-public-key` for the first login.
 
-`DROP …`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE` and `ALTER TABLE … DROP` are held —
-in simple and extended (prepared-statement) protocol, ignoring look-alikes inside strings,
-comments and dollar-quoted bodies. A denied statement returns a normal Postgres error to the
-agent and the session stays usable; the database never sees it.
+`DROP …`, `TRUNCATE`, `DELETE`/`UPDATE` without `WHERE`, `ALTER TABLE … DROP` and
+`MERGE … THEN DELETE` are held — in simple and extended (prepared-statement) protocol, also when
+nested in `WITH`, `EXPLAIN ANALYZE`, `COPY (…)`, `PREPARE` or routine/trigger/event bodies, and
+ignoring look-alikes inside strings, comments and dollar-quoted bodies. A denied statement returns
+a normal database error to the agent and the session stays usable; the database never sees it.
+Held as uninspectable (allow rules never cover them): `DO` blocks, `CALL`, `COPY … PROGRAM`,
+dynamic `EXECUTE`/`PREPARE … FROM @var`, SQL the guard cannot tokenize, and statements over 1 MiB.
+Clients must connect without TLS or compression on the local hop (MySQL `--compress` is refused).
+Functions called from `SELECT` run code twokey cannot see.
 
 ## How it works
 

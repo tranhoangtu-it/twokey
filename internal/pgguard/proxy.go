@@ -26,10 +26,24 @@ const (
 	sslRequestCode    = 80877103
 	gssEncRequestCode = 80877104
 	cancelRequestCode = 80877102
-	maxMessage        = 64 << 20
-	dialTimeout       = 15 * time.Second
+	// maxClientMessage caps a message from the client (it is buffered to
+	// be inspected); maxServerMessage is Postgres' own limit (streamed).
+	maxClientMessage = 64 << 20
+	maxServerMessage = 1 << 30
+	// maxNegotiations bounds SSLRequest/GSSENCRequest rounds before startup.
+	maxNegotiations  = 4
+	dialTimeout      = 15 * time.Second
+	handshakeTimeout = 30 * time.Second
 	// aliveProbe is how long we wait to see whether the client hung up.
 	aliveProbe = 50 * time.Millisecond
+	// DefaultIdleTimeout closes client connections that send nothing for
+	// this long (MySQL's default wait_timeout).
+	DefaultIdleTimeout = 8 * time.Hour
+	// deniedSQL replaces a denied statement on its way upstream: the server
+	// answers it with a syntax error in the right place of the response
+	// stream (and handles Sync and transaction state itself), and the
+	// guard rewrites that error into the denial.
+	deniedSQL = "twokey_denied"
 )
 
 // Options configures a Server.
@@ -42,12 +56,19 @@ type Options struct {
 	Logf        func(string, ...any)
 	// TLSConfig overrides the upstream TLS config (tests).
 	TLSConfig *tls.Config
+	// IdleTimeout closes a client that sends nothing for this long
+	// (DefaultIdleTimeout when zero).
+	IdleTimeout time.Duration
 }
 
 // Server proxies client connections to Options.Upstream.
 type Server struct {
 	o     Options
 	guard *sqlhold.Guard
+
+	mu     sync.Mutex
+	conns  map[net.Conn]struct{}
+	closed bool
 }
 
 // New builds a Postgres guard.
@@ -55,7 +76,10 @@ func New(o Options) *Server {
 	if o.Logf == nil {
 		o.Logf = log.Printf
 	}
-	return &Server{o: o, guard: &sqlhold.Guard{
+	if o.IdleTimeout <= 0 {
+		o.IdleTimeout = DefaultIdleTimeout
+	}
+	return &Server{o: o, conns: map[net.Conn]struct{}{}, guard: &sqlhold.Guard{
 		Provider: "postgres", Broker: o.Broker, Audit: o.Audit, Allow: o.Allow, Logf: o.Logf,
 	}}
 }
@@ -74,6 +98,41 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 }
 
+// Close ends every open session (a held statement is then denied as
+// "client went away"). Close the listener to stop Serve.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for c := range s.conns {
+		_ = c.Close()
+	}
+	return nil
+}
+
+func (s *Server) track(c net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.conns[c] = struct{}{}
+	return true
+}
+
+func (s *Server) untrack(c net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.conns, c)
+}
+
+// survive keeps a crash in one connection from killing the guard.
+func (s *Server) survive() {
+	if r := recover(); r != nil {
+		s.o.Logf("postgres guard: connection closed after an internal error: %v", r)
+	}
+}
+
 type session struct {
 	s        *Server
 	client   net.Conn
@@ -82,15 +141,35 @@ type session struct {
 	database string
 	writeMu  sync.Mutex   // client writes: upstream copier + injected errors
 	status   atomic.Value // last ReadyForQuery status byte ('I', 'T', 'E')
+
+	// Denials in flight: the substituted statement's syntax error, in the
+	// batch (Sync/Query) numbered batch, is replaced by msg. Batch 0 is the
+	// startup exchange; batch k ends with the (k+1)-th ReadyForQuery.
+	denyMu  sync.Mutex
+	denials []denial
+	sent    uint64 // number of the batch the client is sending, from 1
+	ended   uint64 // ReadyForQuery messages seen from upstream
+}
+
+type denial struct {
+	batch uint64
+	msg   []byte
 }
 
 func (s *Server) handle(client net.Conn) {
 	defer client.Close()
+	defer s.survive()
+	if !s.track(client) {
+		return
+	}
+	defer s.untrack(client)
 	cr := bufio.NewReader(client)
+	_ = client.SetDeadline(time.Now().Add(handshakeTimeout))
 	startup, err := readStartup(client, cr)
 	if err != nil {
 		return
 	}
+	_ = client.SetDeadline(time.Time{})
 	code := binary.BigEndian.Uint32(startup[4:8])
 	up, err := s.dialUpstream()
 	if err != nil {
@@ -102,11 +181,12 @@ func (s *Server) handle(client net.Conn) {
 	if _, err := up.Write(startup); err != nil || code == cancelRequestCode {
 		return
 	}
-	sess := &session{s: s, client: client, cr: cr, upstream: up, database: startupParam(startup, "database")}
+	sess := &session{s: s, client: client, cr: cr, upstream: up, database: startupParam(startup, "database"), sent: 1}
 	sess.status.Store(byte('I'))
 	go func() {
+		defer s.survive()
+		defer client.Close() // upstream gone: end the client side too
 		sess.upstreamToClient(bufio.NewReader(up))
-		client.Close() // upstream gone: end the client side too
 	}()
 	sess.clientToUpstream()
 }
@@ -115,7 +195,7 @@ func (s *Server) handle(client net.Conn) {
 // local hop (the client connects to localhost) and returning the raw
 // startup (or cancel) message to forward.
 func readStartup(client net.Conn, r *bufio.Reader) ([]byte, error) {
-	for {
+	for round := 0; round <= maxNegotiations; round++ {
 		var hdr [4]byte
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
 			return nil, err
@@ -138,6 +218,7 @@ func readStartup(client net.Conn, r *bufio.Reader) ([]byte, error) {
 		}
 		return msg, nil
 	}
+	return nil, errors.New("too many encryption requests before startup")
 }
 
 // startupParam extracts a parameter (e.g. "database") from a startup message.
@@ -159,6 +240,7 @@ func (s *Server) dialUpstream() (net.Conn, error) {
 	if err != nil || !s.o.UpstreamTLS {
 		return conn, err
 	}
+	_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
 	req := make([]byte, 8)
 	binary.BigEndian.PutUint32(req[0:4], 8)
 	binary.BigEndian.PutUint32(req[4:8], sslRequestCode)
@@ -181,28 +263,40 @@ func (s *Server) dialUpstream() (net.Conn, error) {
 		conn.Close()
 		return nil, err
 	}
+	_ = conn.SetDeadline(time.Time{})
 	return tc, nil
 }
 
-// readMessage reads one typed protocol message: type, length, payload.
-func readMessage(r *bufio.Reader) (byte, []byte, error) {
+// readHeader reads a message type and payload length (at most max).
+func readHeader(r *bufio.Reader, max int) (byte, int, error) {
 	typ, err := r.ReadByte()
 	if err != nil {
-		return 0, nil, err
+		return 0, 0, err
 	}
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return 0, nil, err
+		return 0, 0, err
 	}
 	n := int(binary.BigEndian.Uint32(hdr[:]))
-	if n < 4 || n > maxMessage {
-		return 0, nil, fmt.Errorf("bad message length %d", n)
+	if n < 4 || n > max {
+		return 0, 0, fmt.Errorf("bad message length %d", n)
 	}
-	payload := make([]byte, n-4)
-	if _, err := io.ReadFull(r, payload); err != nil {
+	return typ, n - 4, nil
+}
+
+// readMessage reads one typed protocol message: type, length, payload. The
+// buffer grows with the bytes that actually arrive, never from the length
+// field alone.
+func readMessage(r *bufio.Reader, max int) (byte, []byte, error) {
+	typ, n, err := readHeader(r, max)
+	if err != nil {
 		return 0, nil, err
 	}
-	return typ, payload, nil
+	var buf bytes.Buffer
+	if _, err := io.CopyN(&buf, r, int64(n)); err != nil {
+		return 0, nil, err
+	}
+	return typ, buf.Bytes(), nil
 }
 
 func encodeMessage(typ byte, payload []byte) []byte {
@@ -221,68 +315,120 @@ func (ss *session) writeClient(b []byte) error {
 }
 
 // upstreamToClient relays whole messages so injected errors never land in
-// the middle of a server message, and tracks the transaction status.
-// It starts after the startup message, where everything is typed.
+// the middle of a server message, tracks the transaction status and turns
+// the error for a substituted statement into the denial. Large messages
+// (rows up to 1 GiB) are streamed, not buffered.
 func (ss *session) upstreamToClient(r *bufio.Reader) {
 	for {
-		typ, payload, err := readMessage(r)
+		typ, n, err := readHeader(r, maxServerMessage)
 		if err != nil {
 			return
 		}
-		if typ == 'Z' && len(payload) == 1 {
-			ss.status.Store(payload[0])
+		if typ == 'Z' || (typ == 'E' && n <= maxClientMessage) {
+			var buf bytes.Buffer
+			if _, err := io.CopyN(&buf, r, int64(n)); err != nil {
+				return
+			}
+			payload := buf.Bytes()
+			if typ == 'Z' {
+				if len(payload) == 1 {
+					ss.status.Store(payload[0])
+				}
+				ss.batchEnded()
+			} else if msg := ss.denialFor(payload); msg != nil {
+				if ss.writeClient(msg) != nil {
+					return
+				}
+				continue
+			}
+			if ss.writeClient(encodeMessage(typ, payload)) != nil {
+				return
+			}
+			continue
 		}
-		if err := ss.writeClient(encodeMessage(typ, payload)); err != nil {
+		if ss.stream(typ, n, r) != nil {
 			return
 		}
 	}
 }
 
+// stream copies one message of n payload bytes to the client.
+func (ss *session) stream(typ byte, n int, r io.Reader) error {
+	ss.writeMu.Lock()
+	defer ss.writeMu.Unlock()
+	var hdr [5]byte
+	hdr[0] = typ
+	binary.BigEndian.PutUint32(hdr[1:], uint32(4+n))
+	if _, err := ss.client.Write(hdr[:]); err != nil {
+		return err
+	}
+	_, err := io.CopyN(ss.client, r, int64(n))
+	return err
+}
+
+// denialFor returns the denial replacing an upstream ErrorResponse, or nil.
+func (ss *session) denialFor(errPayload []byte) []byte {
+	ss.denyMu.Lock()
+	defer ss.denyMu.Unlock()
+	if len(ss.denials) == 0 || ss.denials[0].batch != ss.ended || !bytes.Contains(errPayload, []byte(deniedSQL)) {
+		return nil
+	}
+	msg := ss.denials[0].msg
+	ss.denials = ss.denials[1:]
+	return msg
+}
+
+// batchEnded records a ReadyForQuery and forgets denials of ended batches
+// (a statement after an earlier error in its batch is never parsed).
+func (ss *session) batchEnded() {
+	ss.denyMu.Lock()
+	defer ss.denyMu.Unlock()
+	ss.ended++
+	for len(ss.denials) > 0 && ss.denials[0].batch < ss.ended {
+		ss.denials = ss.denials[1:]
+	}
+}
+
+// deny records a denial for the current batch.
+func (ss *session) deny(msg []byte) {
+	ss.denyMu.Lock()
+	defer ss.denyMu.Unlock()
+	ss.denials = append(ss.denials, denial{batch: ss.sent, msg: msg})
+}
+
+func (ss *session) forwarded(typ byte) {
+	if typ == 'Q' || typ == 'S' || typ == 'F' { // these end a batch with ReadyForQuery
+		ss.denyMu.Lock()
+		ss.sent++
+		ss.denyMu.Unlock()
+	}
+}
+
 func (ss *session) clientToUpstream() {
-	skipUntilSync := false
 	for {
-		typ, payload, err := readMessage(ss.cr)
+		_ = ss.client.SetReadDeadline(time.Now().Add(ss.s.o.IdleTimeout))
+		typ, payload, err := readMessage(ss.cr, maxClientMessage)
 		if err != nil {
 			return
 		}
-		if skipUntilSync {
-			// Extended protocol after a denied Parse: the server never saw
-			// it, so swallow the batch and end it like the server would.
-			if typ == 'S' {
-				skipUntilSync = false
-				if ss.writeClient(readyForQuery(ss.status.Load().(byte))) != nil {
-					return
-				}
-			}
-			continue
-		}
-		var sql string
 		switch typ {
 		case 'Q':
-			sql = cstring(payload)
-		case 'P':
-			if _, rest, ok := bytes.Cut(payload, []byte{0}); ok {
-				sql = cstring(rest)
+			if denied := ss.check(cstring(payload)); denied != nil {
+				ss.deny(denied)
+				payload = append([]byte(deniedSQL), 0)
 			}
-		}
-		if sql != "" {
-			if denied := ss.check(sql); denied != nil {
-				if ss.writeClient(denied) != nil {
-					return
+		case 'P':
+			if name, rest, ok := bytes.Cut(payload, []byte{0}); ok {
+				if denied := ss.check(cstring(rest)); denied != nil {
+					ss.deny(denied)
+					payload = append(append(append([]byte(nil), name...), 0), deniedSQL+"\x00\x00\x00"...)
 				}
-				if typ == 'Q' {
-					if ss.writeClient(readyForQuery(ss.status.Load().(byte))) != nil {
-						return
-					}
-				} else {
-					skipUntilSync = true
-				}
-				continue
 			}
 		}
 		if _, err := ss.upstream.Write(encodeMessage(typ, payload)); err != nil {
 			return
 		}
+		ss.forwarded(typ)
 		if typ == 'X' { // Terminate
 			return
 		}
@@ -290,10 +436,22 @@ func (ss *session) clientToUpstream() {
 }
 
 // check holds destructive SQL; it returns an ErrorResponse to send to the
-// client when the statement must not run, or nil to forward it.
+// client when the statement must not run, or nil to forward it. While a
+// statement is held the client connection is watched: if the client hangs
+// up, the hold ends denied.
 func (ss *session) check(sql string) []byte {
+	findings := sqlclass.Classify(sql)
+	if len(findings) == 0 {
+		return nil
+	}
 	target := "postgres://" + ss.s.o.Upstream + "/" + ss.database
-	msg := ss.s.guard.Check(sqlclass.Classify(sql), target, ss.clientAlive)
+	ctx, stop := sqlhold.WatchClient(ss.client, ss.cr)
+	defer stop()
+	alive := func() bool {
+		stop()
+		return ctx.Err() == nil && ss.clientAlive()
+	}
+	msg := ss.s.guard.CheckContext(ctx, findings, target, alive)
 	if msg == "" {
 		return nil
 	}

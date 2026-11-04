@@ -43,7 +43,7 @@ func TestLenencInt(t *testing.T) {
 	}
 }
 
-func TestClearSSLCapabilityReturnsServerCaps(t *testing.T) {
+func TestHideCapabilitiesReturnsServerCaps(t *testing.T) {
 	// Minimal v10 greeting: version "9.6.0\0", conn id, 8 bytes auth, filler,
 	// caps lower, charset, status, caps upper.
 	p := []byte{10}
@@ -59,7 +59,7 @@ func TestClearSSLCapabilityReturnsServerCaps(t *testing.T) {
 	binary.LittleEndian.PutUint16(upper, uint16(clientQueryAttributes>>16))
 	p = append(p, upper...)
 
-	caps := clearSSLCapability(p)
+	caps := hideCapabilities(p)
 	if caps&clientSSL == 0 {
 		t.Fatal("the server's original caps (incl. CLIENT_SSL) must be reported for upstream TLS")
 	}

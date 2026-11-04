@@ -14,11 +14,19 @@ import (
 )
 
 // fakePostgres speaks just enough of the backend protocol and records the
-// SQL it receives.
+// SQL it receives. Like Postgres, a statement it cannot parse (the guard's
+// substitute for a denied one) is a syntax error, and after an error in an
+// extended-protocol batch it skips messages until Sync.
 type fakePostgres struct {
-	ln  net.Listener
-	mu  sync.Mutex
-	sql []string
+	ln     net.Listener
+	mu     sync.Mutex
+	sql    []string
+	delay  time.Duration // before answering a simple query
+	bigRow int           // "SELECT big" returns a DataRow of this size
+}
+
+func syntaxError(sql string) []byte {
+	return errorResponse("ERROR", "42601", `syntax error at or near "`+sql+`"`, "")
 }
 
 func startFakePostgres(t *testing.T) *fakePostgres {
@@ -53,23 +61,58 @@ func (f *fakePostgres) serve(c net.Conn) {
 	}
 	authOK := encodeMessage('R', []byte{0, 0, 0, 0})
 	_, _ = c.Write(append(authOK, readyForQuery('I')...))
+	failed := false // extended protocol: skip until Sync after an error
 	for {
-		typ, payload, err := readMessage(r)
+		typ, payload, err := readMessage(r, maxClientMessage)
 		if err != nil {
 			return
 		}
+		if failed && typ != 'S' {
+			continue
+		}
 		switch typ {
 		case 'Q':
-			f.record(cstring(payload))
+			time.Sleep(f.delay)
+			sql := cstring(payload)
+			if sql == deniedSQL {
+				_, _ = c.Write(append(syntaxError(sql), readyForQuery('I')...))
+				continue
+			}
+			f.record(sql)
+			if sql == "SELECT big" && f.bigRow > 0 {
+				f.writeBigRow(c)
+			}
 			_, _ = c.Write(append(encodeMessage('C', []byte("OK\x00")), readyForQuery('I')...))
 		case 'P':
 			_, rest, _ := strings.Cut(string(payload), "\x00")
-			f.record(cstring([]byte(rest)))
+			if sql := cstring([]byte(rest)); sql == deniedSQL {
+				_, _ = c.Write(syntaxError(sql))
+				failed = true
+			} else {
+				f.record(sql)
+				_, _ = c.Write(encodeMessage('1', nil))
+			}
+		case 'B':
+			_, _ = c.Write(encodeMessage('2', nil))
+		case 'E':
+			_, _ = c.Write(encodeMessage('C', []byte("OK\x00")))
 		case 'S':
+			failed = false
 			_, _ = c.Write(readyForQuery('I'))
 		case 'X':
 			return
 		}
+	}
+}
+
+func (f *fakePostgres) writeBigRow(c net.Conn) {
+	hdr := make([]byte, 5)
+	hdr[0] = 'D'
+	binary.BigEndian.PutUint32(hdr[1:], uint32(4+f.bigRow))
+	_, _ = c.Write(hdr)
+	chunk := make([]byte, 1<<20)
+	for left := f.bigRow; left > 0; left -= len(chunk) {
+		_, _ = c.Write(chunk[:min(len(chunk), left)])
 	}
 }
 
@@ -111,7 +154,7 @@ func (p *pgClient) until() string {
 	var types []byte
 	_ = p.c.SetReadDeadline(time.Now().Add(5 * time.Second))
 	for {
-		typ, _, err := readMessage(p.r)
+		typ, _, err := readMessage(p.r, maxClientMessage)
 		if err != nil {
 			p.t.Fatalf("read: %v (got %q so far)", err, types)
 		}

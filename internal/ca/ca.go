@@ -231,10 +231,15 @@ func Rotate(dir string) error {
 	return nil
 }
 
-// Permits reports whether the CA may issue a certificate for host.
+// Permits reports whether the CA may issue a certificate for host. A
+// name-constrained CA never issues for IP addresses (new ones exclude all
+// IPs in their constraints; older ones are refused here as well).
 func (a *Authority) Permits(host string) bool {
-	if net.ParseIP(host) != nil || len(a.cert.PermittedDNSDomains) == 0 {
-		return true
+	if len(a.cert.PermittedDNSDomains) == 0 {
+		return true // unconstrained (legacy or test) CA
+	}
+	if net.ParseIP(host) != nil {
+		return false
 	}
 	return domainPermitted(host, a.cert.PermittedDNSDomains)
 }
@@ -352,6 +357,12 @@ func generateRoot(permitted []string) (certPEM, keyPEM []byte, err error) {
 	if len(permitted) > 0 {
 		tpl.PermittedDNSDomains = permitted
 		tpl.PermittedDNSDomainsCritical = true
+		// Without an IP constraint, DNS constraints leave IP addresses
+		// unconstrained: exclude every address of both families.
+		tpl.ExcludedIPRanges = []*net.IPNet{
+			{IP: net.IPv4zero.To4(), Mask: net.CIDRMask(0, 32)},
+			{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)},
+		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
 	if err != nil {
