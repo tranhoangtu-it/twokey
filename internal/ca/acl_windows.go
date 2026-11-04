@@ -4,21 +4,33 @@ package ca
 
 import (
 	"fmt"
-	"os/exec"
-	"os/user"
+
+	"golang.org/x/sys/windows"
 )
 
-// restrictKeyACL removes inherited ACEs from the CA key and grants full
-// control to the current user only (by SID, so localized group names and
-// domain accounts work). Windows ignores the 0600 mode Go passes.
+// restrictKeyACL replaces the CA key's DACL with a single entry granting
+// the current user full control, and marks it protected so nothing is
+// inherited from the folder. Windows ignores the 0600 mode Go passes, and
+// elevated processes create files with explicit SYSTEM/Administrators
+// entries, so editing individual entries is not enough.
 func restrictKeyACL(path string) error {
-	u, err := user.Current()
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
-		return err
+		return fmt.Errorf("current user: %w", err)
 	}
-	out, err := exec.Command("icacls", path, "/inheritance:r", "/grant:r", "*"+u.Uid+":F").CombinedOutput()
+	acl, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
+		AccessPermissions: windows.GENERIC_ALL,
+		AccessMode:        windows.SET_ACCESS,
+		Inheritance:       windows.NO_INHERITANCE,
+		Trustee: windows.TRUSTEE{
+			TrusteeForm:  windows.TRUSTEE_IS_SID,
+			TrusteeType:  windows.TRUSTEE_IS_USER,
+			TrusteeValue: windows.TrusteeValueFromSID(user.User.Sid),
+		},
+	}}, nil)
 	if err != nil {
-		return fmt.Errorf("icacls: %v: %s", err, out)
+		return fmt.Errorf("build ACL: %w", err)
 	}
-	return nil
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 }

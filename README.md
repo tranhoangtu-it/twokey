@@ -54,7 +54,8 @@ go install github.com/tranhoangtu-it/twokey/cmd/twokey@latest                  #
 ```
 
 or download a binary from [Releases](https://github.com/tranhoangtu-it/twokey/releases)
-(Linux, macOS, Windows; amd64/arm64).
+(Linux, macOS, Windows; amd64/arm64). The macOS binary is not notarized yet: if Gatekeeper blocks
+it, run `xattr -d com.apple.quarantine "$(which twokey)"`.
 
 ## Use it
 
