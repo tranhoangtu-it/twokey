@@ -22,3 +22,24 @@ rules:
     resource: "{volume}"
     severity: critical
     message: Deletes a block storage volume.
+  - id: digitalocean.droplet.delete-by-tag
+    hosts: [api.digitalocean.com]
+    methods: [DELETE]
+    path: /v2/droplets
+    resource: "tag:{query.tag_name}"
+    severity: critical
+    message: Destroys EVERY Droplet carrying a tag.
+  - id: digitalocean.droplet.destroy-with-resources
+    hosts: [api.digitalocean.com]
+    methods: [DELETE]
+    path: /v2/droplets/{droplet}/destroy_with_associated_resources/{mode}
+    resource: "{droplet}"
+    severity: critical
+    message: Destroys a Droplet together with its volumes, snapshots and backups.
+  - id: digitalocean.volume.delete-by-name
+    hosts: [api.digitalocean.com]
+    methods: [DELETE]
+    path: /v2/volumes
+    resource: "{query.name} in {query.region}"
+    severity: critical
+    message: Deletes a block storage volume selected by name.

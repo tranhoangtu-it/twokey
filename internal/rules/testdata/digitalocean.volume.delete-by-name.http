@@ -1,0 +1,12 @@
+# source: https://docs.digitalocean.com/reference/api/digitalocean/#tag/Block-Storage/operation/volumes_delete_byName
+# resource: pg-data in nyc1
+DELETE https://api.digitalocean.com/v2/volumes?name=pg-data&region=nyc1
+###
+# safe: listing volumes by name
+GET https://api.digitalocean.com/v2/volumes?name=pg-data&region=nyc1
+###
+# safe: creating a volume
+POST https://api.digitalocean.com/v2/volumes
+Content-Type: application/json
+
+{"size_gigabytes":10,"name":"pg-data-2","region":"nyc1"}

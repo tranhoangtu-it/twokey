@@ -227,7 +227,8 @@ func (e *Engine) Evaluate(req Request) Verdict {
 		if len(r.UnlessQuery) > 0 && hasAnyQueryKey(req.Query, r.UnlessQuery) {
 			continue
 		}
-		vars := map[string]string{"host": host}
+		vars := queryVars(req.Query)
+		vars["host"] = host
 		if r.tpl != nil {
 			captured, ok := r.tpl.match(req.Path)
 			if !ok {
@@ -284,6 +285,23 @@ func (r *Rule) matchHost(host string) bool {
 		}
 	}
 	return false
+}
+
+// queryVars exposes query parameters to resource templates as
+// "{query.<key>}" (first value), e.g. DigitalOcean's delete-by-tag
+// `DELETE /v2/droplets?tag_name=…`, whose target lives in the query.
+func queryVars(rawQuery string) map[string]string {
+	vars := map[string]string{}
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return vars
+	}
+	for k, vs := range q {
+		if len(vs) > 0 {
+			vars["query."+k] = vs[0]
+		}
+	}
+	return vars
 }
 
 // expandResource fills "{name}" placeholders from vars; "{a|b}" takes the
