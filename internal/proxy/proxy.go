@@ -61,11 +61,11 @@ type Options struct {
 
 // Server implements http.Handler for forward-proxy traffic.
 type Server struct {
-	engine    *rules.Engine
-	ca        *ca.Authority
-	broker    *approval.Broker
-	audit     *audit.Log
-	logf      func(string, ...any)
+	engine      *rules.Engine
+	ca          *ca.Authority
+	broker      *approval.Broker
+	audit       *audit.Log
+	logf        func(string, ...any)
 	version     string
 	transport   http.RoundTripper
 	upstreamTLS *tls.Config

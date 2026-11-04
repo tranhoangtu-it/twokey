@@ -1,7 +1,7 @@
-// Package pgguard is a Postgres wire-protocol proxy that holds destructive
-// SQL (DROP, TRUNCATE, DELETE/UPDATE without WHERE, ALTER … DROP) until a
-// human approves it.
-package pgguard
+// Package sqlclass finds destructive SQL statements (DROP, TRUNCATE,
+// DELETE/UPDATE without WHERE, ALTER … DROP) for the Postgres and MySQL
+// guards. It is a dialect-aware lexer, not a full parser.
+package sqlclass
 
 import (
 	"strings"
@@ -21,9 +21,15 @@ const maxStatementShown = 200
 // Classify returns the destructive statements in sql. It is a lexer, not a
 // parser: comments, string literals, dollar-quoted bodies and quoted
 // identifiers are understood so "SELECT 'drop table x'" is not flagged.
-func Classify(sql string) []Finding {
+func Classify(sql string) []Finding { return classify(sql, false) }
+
+// ClassifyMySQL is Classify for MySQL syntax: # comments, `backtick`
+// identifiers, "double-quoted" strings and backslash escapes.
+func ClassifyMySQL(sql string) []Finding { return classify(sql, true) }
+
+func classify(sql string, mysql bool) []Finding {
 	var out []Finding
-	for _, st := range splitStatements(sql) {
+	for _, st := range splitStatements(sql, mysql) {
 		if f, ok := classifyStatement(st); ok {
 			out = append(out, f)
 		}
@@ -43,7 +49,7 @@ type statement struct {
 }
 
 // splitStatements tokenizes and splits on top-level semicolons.
-func splitStatements(sql string) []statement {
+func splitStatements(sql string, mysql bool) []statement {
 	var stmts []statement
 	var cur statement
 	var text strings.Builder
@@ -59,7 +65,7 @@ func splitStatements(sql string) []statement {
 	for i := 0; i < len(rs); {
 		r := rs[i]
 		switch {
-		case r == '-' && i+1 < len(rs) && rs[i+1] == '-':
+		case (r == '-' && i+1 < len(rs) && rs[i+1] == '-') || (mysql && r == '#'):
 			for i < len(rs) && rs[i] != '\n' {
 				i++
 			}
@@ -83,12 +89,16 @@ func splitStatements(sql string) []statement {
 				i++
 			}
 			text.WriteRune(' ')
-		case r == '\'':
+		case r == '\'' || (mysql && r == '"'):
 			start := i
 			i++
 			for i < len(rs) {
-				if rs[i] == '\'' {
-					if i+1 < len(rs) && rs[i+1] == '\'' { // '' escape
+				if mysql && rs[i] == '\\' { // MySQL backslash escape
+					i += 2
+					continue
+				}
+				if rs[i] == r {
+					if i+1 < len(rs) && rs[i+1] == r { // '' escape
 						i += 2
 						continue
 					}
@@ -99,10 +109,10 @@ func splitStatements(sql string) []statement {
 			}
 			text.WriteString(string(rs[start:i]))
 			cur.tokens = append(cur.tokens, token{raw: "'…'"})
-		case r == '"':
+		case r == '"' || (mysql && r == '`'):
 			start := i
 			i++
-			for i < len(rs) && rs[i] != '"' {
+			for i < len(rs) && rs[i] != r {
 				i++
 			}
 			if i < len(rs) {
@@ -110,7 +120,7 @@ func splitStatements(sql string) []statement {
 			}
 			raw := string(rs[start:i])
 			text.WriteString(raw)
-			cur.tokens = append(cur.tokens, token{word: strings.Trim(raw, `"`), quoted: true, raw: raw})
+			cur.tokens = append(cur.tokens, token{word: strings.Trim(raw, "\"`"), quoted: true, raw: raw})
 		case r == '$' && dollarTag(rs, i) != "":
 			tag := []rune(dollarTag(rs, i))
 			start := i

@@ -19,18 +19,18 @@ import (
 // Rule describes one destructive operation. Every matcher that is set must
 // match for the rule to fire.
 type Rule struct {
-	ID       string        `yaml:"id"`
-	Hosts    []string      `yaml:"hosts"`
-	Methods  []string      `yaml:"methods"`
-	Path     string        `yaml:"path"`
+	ID      string   `yaml:"id"`
+	Hosts   []string `yaml:"hosts"`
+	Methods []string `yaml:"methods"`
+	Path    string   `yaml:"path"`
 	// UnlessQuery skips the rule when any of these query keys is present,
 	// e.g. S3 "DELETE /?policy" deletes a bucket policy, not the bucket.
 	UnlessQuery []string      `yaml:"unless_query"`
 	GraphQL     *GraphQLMatch `yaml:"graphql"`
-	AWS      *AWSMatch     `yaml:"aws"`
-	Resource string        `yaml:"resource"`
-	Severity string        `yaml:"severity"`
-	Message  string        `yaml:"message"`
+	AWS         *AWSMatch     `yaml:"aws"`
+	Resource    string        `yaml:"resource"`
+	Severity    string        `yaml:"severity"`
+	Message     string        `yaml:"message"`
 
 	provider string
 	tpl      *pathTemplate

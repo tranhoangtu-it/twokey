@@ -1,4 +1,4 @@
-package pgguard
+package sqlclass
 
 import "testing"
 
@@ -39,6 +39,36 @@ func TestClassify(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := Classify(tc.sql)
+		if tc.wantKind == "" {
+			if len(got) != 0 {
+				t.Errorf("%q: want no finding, got %+v", tc.sql, got)
+			}
+			continue
+		}
+		if len(got) != 1 || got[0].Kind != tc.wantKind || got[0].Target != tc.wantTarget {
+			t.Errorf("%q: got %+v, want %s on %s", tc.sql, got, tc.wantKind, tc.wantTarget)
+		}
+	}
+}
+
+func TestClassifyMySQL(t *testing.T) {
+	tests := []struct {
+		sql        string
+		wantKind   string
+		wantTarget string
+	}{
+		{"DROP TABLE `orders`", "DROP TABLE", "`orders`"},
+		{"# cleanup\nDROP DATABASE shop", "DROP DATABASE", "shop"},
+		{"TRUNCATE TABLE sessions", "TRUNCATE", "sessions"},
+		{"DELETE FROM users", "DELETE without WHERE", "users"},
+		{"SELECT \"drop table users\"", "", ""},   // double quotes are strings in MySQL
+		{"SELECT 'it\\'s; drop table x'", "", ""}, // backslash escape keeps the string open
+		{"SELECT `drop` FROM t", "", ""},          // backtick identifier
+		{"SELECT 1 # drop table users", "", ""},   // # comment
+		{"UPDATE accounts SET balance = 0 WHERE id = 1", "", ""},
+	}
+	for _, tc := range tests {
+		got := ClassifyMySQL(tc.sql)
 		if tc.wantKind == "" {
 			if len(got) != 0 {
 				t.Errorf("%q: want no finding, got %+v", tc.sql, got)

@@ -182,7 +182,7 @@ func cmdRun(args []string) error {
 		p, err := startProxy(ctx, proxyConfig{
 			addr: "127.0.0.1:0", timeout: *timeout, rulesDir: *rulesDir, phone: true,
 			ntfyTopic: os.Getenv("TWOKEY_NTFY_TOPIC"), ntfyServer: envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"),
-			logTo: logFile, // keep diagnostics out of the agent's TUI
+			logTo:     logFile, // keep diagnostics out of the agent's TUI
 			allowFile: *allow,
 		})
 		if err != nil {

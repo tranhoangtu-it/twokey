@@ -3,7 +3,6 @@ package pgguard
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +17,8 @@ import (
 	"github.com/tranhoangtu-it/twokey/internal/approval"
 	"github.com/tranhoangtu-it/twokey/internal/audit"
 	"github.com/tranhoangtu-it/twokey/internal/rules"
+	"github.com/tranhoangtu-it/twokey/internal/sqlclass"
+	"github.com/tranhoangtu-it/twokey/internal/sqlhold"
 )
 
 // Protocol constants (Postgres frontend/backend protocol v3).
@@ -45,14 +45,19 @@ type Options struct {
 }
 
 // Server proxies client connections to Options.Upstream.
-type Server struct{ o Options }
+type Server struct {
+	o     Options
+	guard *sqlhold.Guard
+}
 
 // New builds a Postgres guard.
 func New(o Options) *Server {
 	if o.Logf == nil {
 		o.Logf = log.Printf
 	}
-	return &Server{o: o}
+	return &Server{o: o, guard: &sqlhold.Guard{
+		Provider: "postgres", Broker: o.Broker, Audit: o.Audit, Allow: o.Allow, Logf: o.Logf,
+	}}
 }
 
 // Serve accepts connections until ln is closed.
@@ -287,44 +292,12 @@ func (ss *session) clientToUpstream() {
 // check holds destructive SQL; it returns an ErrorResponse to send to the
 // client when the statement must not run, or nil to forward it.
 func (ss *session) check(sql string) []byte {
-	findings := Classify(sql)
-	if len(findings) == 0 {
-		return nil
-	}
-	v := rules.Verdict{}
-	for _, f := range findings {
-		v.Matches = append(v.Matches, rules.Match{
-			RuleID: "postgres." + ruleSlug(f.Kind), Provider: "postgres", Severity: "critical",
-			Operation: f.Kind, Resource: f.Target, Message: f.Statement,
-		})
-	}
 	target := "postgres://" + ss.s.o.Upstream + "/" + ss.database
-	v, allowed := rules.ApplyAllow(v, ss.s.o.Allow)
-	if len(allowed) > 0 {
-		ss.auditWrite(audit.Entry{Time: time.Now(), Method: "SQL", URL: target, Matches: allowed,
-			Approved: true, By: "allowlist", Reason: "pre-approved by allow rules"})
-	}
-	if !v.Hold() {
+	msg := ss.s.guard.Check(sqlclass.Classify(sql), target, ss.clientAlive)
+	if msg == "" {
 		return nil
 	}
-	held, d := ss.s.o.Broker.Decide(context.Background(), approval.Request{Method: "SQL", URL: target, Matches: v.Matches})
-	if d.Approved && !ss.clientAlive() {
-		d = approval.Decision{By: "client", Reason: "client disconnected before the decision"}
-	}
-	ss.auditWrite(audit.Entry{Time: time.Now(), ID: held.ID, Method: held.Method, URL: held.URL,
-		Matches: held.Matches, Approved: d.Approved, By: d.By, Reason: d.Reason})
-	if d.Approved {
-		return nil
-	}
-	msg := fmt.Sprintf("twokey blocked a destructive statement (%s): %s", d.Reason, held.Summary())
-	hint := "Do not retry or work around this statement. Tell the user what you tried to run and ask them to approve it in the twokey window or run it themselves."
-	return errorResponse("ERROR", "42501", msg, hint)
-}
-
-func (ss *session) auditWrite(e audit.Entry) {
-	if err := ss.s.o.Audit.Write(e); err != nil {
-		ss.s.o.Logf("audit log write failed: %v", err)
-	}
+	return errorResponse("ERROR", "42501", msg, sqlhold.Hint)
 }
 
 // clientAlive reports whether the client is still connected (approving a
@@ -335,12 +308,6 @@ func (ss *session) clientAlive() bool {
 	_ = ss.client.SetReadDeadline(time.Time{})
 	var ne net.Error
 	return err == nil || (errors.As(err, &ne) && ne.Timeout())
-}
-
-func ruleSlug(kind string) string {
-	s := strings.ToLower(kind)
-	s = strings.NewReplacer(" … ", "-", " ", "-").Replace(s)
-	return s
 }
 
 func cstring(b []byte) string {
