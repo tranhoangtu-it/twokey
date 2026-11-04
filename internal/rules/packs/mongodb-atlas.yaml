@@ -8,3 +8,10 @@ rules:
     resource: "{group}/{cluster}"
     severity: critical
     message: Deletes a MongoDB Atlas cluster and its data.
+  - id: mongodb-atlas.flex-cluster.delete
+    hosts: [cloud.mongodb.com]
+    methods: [DELETE]
+    path: /api/atlas/{version}/groups/{group}/flexClusters/{cluster}
+    resource: "{group}/{cluster}"
+    severity: critical
+    message: Deletes a MongoDB Atlas Flex cluster and its data.

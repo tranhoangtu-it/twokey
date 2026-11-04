@@ -98,7 +98,7 @@ Every hold is appended to `~/.twokey/audit.jsonl`; read it with `twokey log`
 
 ## What's covered
 
-`twokey rules` lists all 75 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
+`twokey rules` lists all 76 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
 Lambda, EKS, Secrets Manager, ECR, Route 53), Google Cloud (Storage, Cloud SQL, Compute,
 projects), Azure (resource groups and resources), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
 Fly.io, Cloudflare (incl. Pages), DigitalOcean, Heroku, Render, Netlify, PlanetScale, Turso,
