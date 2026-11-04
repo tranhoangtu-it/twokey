@@ -36,6 +36,15 @@ var errNoPayload = errors.New("no GraphQL payload")
 // maxFragmentDepth bounds fragment recursion on hostile input.
 const maxFragmentDepth = 10
 
+// maxSelections bounds the top-level selections visited per operation once
+// fragments are expanded: fragments that each spread the next one many
+// times fan out exponentially (CPU exhaustion) long before the depth cap.
+const maxSelections = 10000
+
+// maxArgValues bounds the flattened argument values across all selections:
+// one large variable referenced by thousands of fields is the same fan-out.
+const maxArgValues = 100000
+
 // parseGraphQLBody extracts every mutation field the request would execute.
 // It accepts a single JSON payload, a batched JSON array, a raw
 // application/graphql body, or GraphQL-over-GET query parameters. Anything it
@@ -122,7 +131,8 @@ func mutationCalls(p graphqlPayload) ([]gqlCall, error) {
 		if p.OperationName != "" && len(doc.Operations) > 1 && op.Name != p.OperationName {
 			continue
 		}
-		calls, err = appendFieldCalls(calls, op.SelectionSet, doc.Fragments, p.Variables, 0)
+		w := &selectionWalker{frags: doc.Fragments, vars: p.Variables}
+		calls, err = w.appendFieldCalls(calls, op.SelectionSet, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -130,27 +140,41 @@ func mutationCalls(p graphqlPayload) ([]gqlCall, error) {
 	return calls, nil
 }
 
-func appendFieldCalls(calls []gqlCall, set ast.SelectionSet, frags ast.FragmentDefinitionList, vars map[string]any, depth int) ([]gqlCall, error) {
+// selectionWalker expands the top-level selections of one operation.
+type selectionWalker struct {
+	frags   ast.FragmentDefinitionList
+	vars    map[string]any
+	visited int
+	values  int
+}
+
+func (w *selectionWalker) appendFieldCalls(calls []gqlCall, set ast.SelectionSet, depth int) ([]gqlCall, error) {
 	if depth > maxFragmentDepth {
 		return nil, fmt.Errorf("fragments nested deeper than %d", maxFragmentDepth)
 	}
 	var err error
 	for _, sel := range set {
+		if w.visited++; w.visited > maxSelections {
+			return nil, fmt.Errorf("more than %d selections once fragments are expanded", maxSelections)
+		}
 		switch s := sel.(type) {
 		case *ast.Field:
 			args := map[string]string{}
 			for _, a := range s.Arguments {
-				flattenGraphQLValue(a.Name, a.Value, vars, args)
+				flattenGraphQLValue(a.Name, a.Value, w.vars, args)
+			}
+			if w.values += len(args); w.values > maxArgValues {
+				return nil, fmt.Errorf("more than %d argument values", maxArgValues)
 			}
 			calls = append(calls, gqlCall{name: s.Name, args: args})
 		case *ast.InlineFragment:
-			calls, err = appendFieldCalls(calls, s.SelectionSet, frags, vars, depth+1)
+			calls, err = w.appendFieldCalls(calls, s.SelectionSet, depth+1)
 		case *ast.FragmentSpread:
-			f := frags.ForName(s.Name)
+			f := w.frags.ForName(s.Name)
 			if f == nil {
 				return nil, fmt.Errorf("unknown fragment %q", s.Name)
 			}
-			calls, err = appendFieldCalls(calls, f.SelectionSet, frags, vars, depth+1)
+			calls, err = w.appendFieldCalls(calls, f.SelectionSet, depth+1)
 		}
 		if err != nil {
 			return nil, err

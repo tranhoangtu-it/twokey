@@ -45,7 +45,7 @@ func (s *Server) handle(req *http.Request, host string, watch func() func()) *ht
 		}
 		body = b
 	}
-	if resp := s.check(req, host, body, watch); resp != nil {
+	if resp := s.check(req, host, body, "", watch); resp != nil {
 		return resp
 	}
 	return s.forward(req)
@@ -53,14 +53,21 @@ func (s *Server) handle(req *http.Request, host string, watch func() func()) *ht
 
 // check evaluates req and, if it is destructive, holds it for a human.
 // It returns nil when the request may proceed, else the response to send.
-func (s *Server) check(req *http.Request, host string, body []byte, watch func() func()) *http.Response {
+// uninspectable, when set, forces a hold for that reason (e.g. an upgrade
+// whose later messages the rules cannot see).
+func (s *Server) check(req *http.Request, host string, body []byte, uninspectable string, watch func() func()) *http.Response {
 	evalBody, decErr := decodeForInspection(req.Header.Get("Content-Encoding"), body)
 	v := s.engine.Evaluate(rules.Request{
 		Method: req.Method, Host: host, Path: req.URL.Path, Query: req.URL.RawQuery,
 		Header: req.Header, Body: evalBody,
 	})
-	if decErr != nil && !v.Hold() && s.engine.NeedsBody(host) {
-		v.Uninspectable = "request body could not be decoded for inspection: " + decErr.Error()
+	if decErr != nil && s.engine.NeedsBody(host) {
+		// Whatever else matched: the body rules never saw this body, so
+		// neither an allow rule nor a grant may wave it through.
+		uninspectable = "request body could not be decoded for inspection: " + decErr.Error()
+	}
+	if uninspectable != "" && v.Uninspectable == "" {
+		v.Uninspectable = uninspectable
 	}
 	v, allowed := rules.ApplyAllow(v, s.allow)
 	if len(allowed) > 0 {
@@ -76,8 +83,12 @@ func (s *Server) check(req *http.Request, host string, body []byte, watch func()
 	}
 	if body == nil {
 		// Consume the body now so the client watcher is the only reader.
-		if _, errResp := bufferBody(req); errResp != nil {
+		b, errResp := bufferBody(req)
+		if errResp != nil {
 			return errResp
+		}
+		if evalBody, decErr = decodeForInspection(req.Header.Get("Content-Encoding"), b); decErr != nil {
+			evalBody = b
 		}
 	}
 	stop := func() {}
@@ -86,6 +97,8 @@ func (s *Server) check(req *http.Request, host string, body []byte, watch func()
 	}
 	held, d := s.broker.Decide(req.Context(), approval.Request{
 		Method: req.Method, URL: displayURL(req), Matches: v.Matches, Uninspectable: v.Uninspectable,
+		// Timed grants bind to the exact payload, not just method + URL.
+		Fingerprint: approval.BodyFingerprint(evalBody, req.URL.RawQuery),
 	})
 	stop()
 	if d.Approved && req.Context().Err() != nil {
