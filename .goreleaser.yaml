@@ -40,11 +40,11 @@ homebrew_casks:
     repository:
       owner: tranhoangtu-it
       name: homebrew-tap
-      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
     homepage: https://github.com/tranhoangtu-it/twokey
     description: Make your AI agent ask a human before it deletes prod
     license: MIT
-    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}auto{{ else }}true{{ end }}'
     caveats: |
       The macOS binary is not notarized yet. If Gatekeeper blocks it, run:
         xattr -d com.apple.quarantine "$(which twokey)"
@@ -56,11 +56,11 @@ scoops:
     repository:
       owner: tranhoangtu-it
       name: scoop-bucket
-      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
     homepage: https://github.com/tranhoangtu-it/twokey
     description: Make your AI agent ask a human before it deletes prod
     license: MIT
-    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}auto{{ else }}true{{ end }}'
 
 release:
   footer: |
