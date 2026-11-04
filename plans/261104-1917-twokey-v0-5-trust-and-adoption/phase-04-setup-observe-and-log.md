@@ -1,10 +1,11 @@
 ---
 phase: 4
-title: "Setup observe and log"
-status: pending
+title: Setup observe and log
+status: completed
 priority: P1
-dependencies: [1]
-effort: "S"
+dependencies:
+  - 1
+effort: S
 ---
 
 # Phase 4: Setup, observe mode, log viewer

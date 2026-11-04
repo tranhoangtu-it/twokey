@@ -1,10 +1,11 @@
 ---
 phase: 2
-title: "CA trust hardening and uninstall"
-status: pending
+title: CA trust hardening and uninstall
+status: completed
 priority: P1
-dependencies: [1]
-effort: "S"
+dependencies:
+  - 1
+effort: S
 ---
 
 # Phase 2: CA trust hardening and uninstall

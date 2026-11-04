@@ -1,10 +1,12 @@
 ---
 phase: 5
-title: "Desktop notifications and timed approvals"
-status: pending
+title: Desktop notifications and timed approvals
+status: completed
 priority: P2
-dependencies: [1, 4]
-effort: "M"
+dependencies:
+  - 1
+  - 4
+effort: M
 ---
 
 # Phase 5: Desktop notifications and timed approvals

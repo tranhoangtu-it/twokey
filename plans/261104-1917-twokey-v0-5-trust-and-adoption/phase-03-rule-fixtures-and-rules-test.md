@@ -1,10 +1,11 @@
 ---
 phase: 3
-title: "Rule fixtures and rules test"
-status: pending
+title: Rule fixtures and rules test
+status: completed
 priority: P1
-dependencies: [1]
-effort: "M"
+dependencies:
+  - 1
+effort: M
 ---
 
 # Phase 3: Rule fixtures and rules test
