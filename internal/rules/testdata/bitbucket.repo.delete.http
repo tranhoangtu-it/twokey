@@ -1,0 +1,17 @@
+# source: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-repositories/#api-repositories-workspace-repo-slug-delete
+# resource: acme/prod-api
+DELETE https://api.bitbucket.org/2.0/repositories/acme/prod-api
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same repository
+GET https://api.bitbucket.org/2.0/repositories/acme/prod-api
+Authorization: Bearer TOKEN
+
+###
+# safe: updating repository settings
+PUT https://api.bitbucket.org/2.0/repositories/acme/prod-api
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"description":"Production API"}

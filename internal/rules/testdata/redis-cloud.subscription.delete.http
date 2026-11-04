@@ -1,0 +1,20 @@
+# source: https://redis.io/docs/latest/operate/rc/api/examples/manage-subscriptions/#delete-a-pro-subscription
+# resource: 123456
+DELETE https://api.redislabs.com/v1/subscriptions/123456
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: reading the same subscription
+GET https://api.redislabs.com/v1/subscriptions/123456
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: renaming the subscription
+PUT https://api.redislabs.com/v1/subscriptions/123456
+Content-Type: application/json
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+{"name":"new-subscription-name"}

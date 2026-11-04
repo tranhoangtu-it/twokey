@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/memorystore/docs/redis/reference/rest/v1/projects.locations.instances/delete
+# resource: my-project/us-central1/cache
+DELETE https://redis.googleapis.com/v1/projects/my-project/locations/us-central1/instances/cache
+###
+# safe: reading the same instance
+GET https://redis.googleapis.com/v1/projects/my-project/locations/us-central1/instances/cache
+###
+# safe: deleting a finished long-running operation record
+DELETE https://redis.googleapis.com/v1/projects/my-project/locations/us-central1/operations/operation-123

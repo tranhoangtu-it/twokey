@@ -1,0 +1,38 @@
+provider: redis-cloud
+docs: https://redis.io/docs/latest/operate/rc/api/
+rules:
+  - id: redis-cloud.subscription.delete
+    hosts: [api.redislabs.com]
+    methods: [DELETE]
+    path: /v1/subscriptions/{subscription}
+    resource: "{subscription}"
+    severity: critical
+    message: Deletes a Redis Cloud Pro subscription.
+  - id: redis-cloud.database.delete
+    hosts: [api.redislabs.com]
+    methods: [DELETE]
+    path: /v1/subscriptions/{subscription}/databases/{database}
+    resource: "{subscription}/{database}"
+    severity: critical
+    message: Deletes a Redis Cloud Pro database and its data.
+  - id: redis-cloud.database.flush
+    hosts: [api.redislabs.com]
+    methods: [PUT]
+    path: /v1/subscriptions/{subscription}/databases/{database}/flush
+    resource: "{subscription}/{database}"
+    severity: critical
+    message: Flushes (erases every key of) a Redis Cloud Active-Active database.
+  - id: redis-cloud.essentials-subscription.delete
+    hosts: [api.redislabs.com]
+    methods: [DELETE]
+    path: /v1/fixed/subscriptions/{subscription}
+    resource: "{subscription}"
+    severity: critical
+    message: Deletes a Redis Cloud Essentials subscription.
+  - id: redis-cloud.essentials-database.delete
+    hosts: [api.redislabs.com]
+    methods: [DELETE]
+    path: /v1/fixed/subscriptions/{subscription}/databases/{database}
+    resource: "{subscription}/{database}"
+    severity: critical
+    message: Deletes a Redis Cloud Essentials database and its data.

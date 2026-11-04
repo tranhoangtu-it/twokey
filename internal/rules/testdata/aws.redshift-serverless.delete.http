@@ -1,0 +1,21 @@
+# source: https://docs.aws.amazon.com/redshift-serverless/latest/APIReference/API_DeleteNamespace.html
+# resource: analytics
+POST https://redshift-serverless.us-east-1.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: RedshiftServerless.DeleteNamespace
+
+{"namespaceName": "analytics"}
+###
+# safe: reading the same namespace
+POST https://redshift-serverless.us-east-1.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: RedshiftServerless.GetNamespace
+
+{"namespaceName": "analytics"}
+###
+# safe: snapshotting the same namespace is not a delete
+POST https://redshift-serverless.us-east-1.amazonaws.com/
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: RedshiftServerless.CreateSnapshot
+
+{"namespaceName": "analytics", "snapshotName": "analytics-manual"}

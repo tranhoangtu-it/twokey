@@ -1,0 +1,22 @@
+# source: https://docs.gitlab.com/api/projects/#delete-a-project
+# resource: acme/api
+DELETE https://gitlab.com/api/v4/projects/acme%2Fapi
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: reading the same project
+GET https://gitlab.com/api/v4/projects/acme%2Fapi
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: archiving keeps the project
+POST https://gitlab.com/api/v4/projects/acme%2Fapi/archive
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: editing project settings
+PUT https://gitlab.com/api/v4/projects/acme%2Fapi
+PRIVATE-TOKEN: TOKEN
+Content-Type: application/json
+
+{"description":"Production API"}

@@ -1,0 +1,18 @@
+# source: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/workspaces#force-delete-a-workspace
+# resource: my-organization/workspace-1
+DELETE https://app.terraform.io/api/v2/organizations/my-organization/workspaces/workspace-1
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+###
+# safe: reading the same workspace
+GET https://app.terraform.io/api/v2/organizations/my-organization/workspaces/workspace-1
+Authorization: Bearer TOKEN
+
+###
+# safe: updating workspace settings
+PATCH https://app.terraform.io/api/v2/organizations/my-organization/workspaces/workspace-1
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"workspaces","attributes":{"terraform-version":"1.9.0"}}}

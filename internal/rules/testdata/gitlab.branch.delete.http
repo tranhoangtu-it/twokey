@@ -1,0 +1,14 @@
+# source: https://docs.gitlab.com/api/branches/#delete-repository-branch
+# resource: 278964:feature/login
+DELETE https://gitlab.com/api/v4/projects/278964/repository/branches/feature%2Flogin
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: reading the same branch
+GET https://gitlab.com/api/v4/projects/278964/repository/branches/feature%2Flogin
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: creating a branch
+POST https://gitlab.com/api/v4/projects/278964/repository/branches?branch=feature%2Flogin&ref=main
+PRIVATE-TOKEN: TOKEN

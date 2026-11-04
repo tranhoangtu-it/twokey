@@ -1,0 +1,18 @@
+# source: https://docs.aws.amazon.com/AmazonElastiCache/latest/APIReference/API_DeleteCacheCluster.html
+# resource: simcoprod43
+POST https://elasticache.us-west-2.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DeleteCacheCluster&CacheClusterId=simcoprod43&Version=2015-02-02
+###
+# safe: reading the same cluster
+POST https://elasticache.us-west-2.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=DescribeCacheClusters&CacheClusterId=simcoprod43&Version=2015-02-02
+###
+# safe: taking a snapshot of the same cluster is not a delete
+POST https://elasticache.us-west-2.amazonaws.com/
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+
+Action=CreateSnapshot&CacheClusterId=simcoprod43&SnapshotName=simcoprod43-manual&Version=2015-02-02

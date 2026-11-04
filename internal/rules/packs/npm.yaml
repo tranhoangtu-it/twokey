@@ -1,0 +1,36 @@
+provider: npm
+docs: https://github.com/npm/registry/tree/main/docs
+# Unpublish is not in the registry's REST docs; the request shapes below are
+# the ones the npm CLI sends (libnpmpublish unpublish.js). Scoped names are
+# sent as "@scope%2fpkg", which reaches the engine decoded as two segments.
+# Unpublishing one version first PUTs the packument without that version,
+# then DELETEs its tarball: only the tarball DELETE is held here.
+rules:
+  - id: npm.package.unpublish
+    hosts: [registry.npmjs.org]
+    methods: [DELETE]
+    path: /{package}/-rev/{rev}
+    resource: "{package}"
+    severity: critical
+    message: Unpublishes every version of an npm package.
+  - id: npm.scoped-package.unpublish
+    hosts: [registry.npmjs.org]
+    methods: [DELETE]
+    path: /{scope}/{package}/-rev/{rev}
+    resource: "{scope}/{package}"
+    severity: critical
+    message: Unpublishes every version of a scoped npm package.
+  - id: npm.version.unpublish
+    hosts: [registry.npmjs.org]
+    methods: [DELETE]
+    path: /{package}/-/{tarball}/-rev/{rev}
+    resource: "{package}:{tarball}"
+    severity: critical
+    message: Deletes the tarball of an unpublished npm package version.
+  - id: npm.scoped-version.unpublish
+    hosts: [registry.npmjs.org]
+    methods: [DELETE]
+    path: /{scope}/{package}/-/{tarball}/-rev/{rev}
+    resource: "{scope}/{package}:{tarball}"
+    severity: critical
+    message: Deletes the tarball of an unpublished scoped npm package version.

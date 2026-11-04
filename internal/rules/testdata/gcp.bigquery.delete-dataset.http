@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets/delete
+# resource: my-project/analytics
+DELETE https://bigquery.googleapis.com/bigquery/v2/projects/my-project/datasets/analytics?deleteContents=true
+###
+# safe: reading the same dataset
+GET https://bigquery.googleapis.com/bigquery/v2/projects/my-project/datasets/analytics
+###
+# safe: listing the dataset's tables
+GET https://bigquery.googleapis.com/bigquery/v2/projects/my-project/datasets/analytics/tables

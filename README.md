@@ -98,11 +98,19 @@ Every hold is appended to `~/.twokey/audit.jsonl`; read it with `twokey log`
 
 ## What's covered
 
-`twokey rules` lists all 76 rules across Railway, AWS (RDS, EC2, DynamoDB, CloudFormation, S3,
-Lambda, EKS, Secrets Manager, ECR, Route 53), Google Cloud (Storage, Cloud SQL, Compute,
-projects), Azure (resource groups and resources), GitHub (REST + GraphQL), Vercel, Supabase, Neon,
-Fly.io, Cloudflare (incl. Pages), DigitalOcean, Heroku, Render, Netlify, PlanetScale, Turso,
-MongoDB Atlas, Hetzner, Linode, Vultr and Upstash. Rules are small YAML files:
+`twokey rules` lists all 126 rules across 31 providers:
+
+- **Clouds:** AWS (RDS/Aurora/DocumentDB/Neptune, EC2, DynamoDB, S3, Lambda, EKS, CloudFormation,
+  Secrets Manager, ECR, Route 53, EFS, ElastiCache, Redshift, OpenSearch, KMS key deletion,
+  AWS Backup), Google Cloud (Storage, Cloud SQL, Compute, BigQuery, Firestore, Spanner, GKE,
+  Memorystore, projects), Azure (resource groups and resources), DigitalOcean, Hetzner, Linode, Vultr
+- **App platforms:** Railway, Vercel, Fly.io, Render, Heroku, Netlify, Cloudflare (incl. Pages, R2, D1)
+- **Databases:** Supabase, Neon, PlanetScale, Turso, MongoDB Atlas, Upstash, Redis Cloud, Aiven,
+  ClickHouse Cloud, Elastic Cloud, Databricks (Unity Catalog), Pinecone
+- **Code & delivery:** GitHub (REST + GraphQL), GitLab, Bitbucket, Terraform Cloud (incl. destroy
+  runs), npm (unpublish)
+
+Rules are small YAML files:
 
 ```yaml
 - id: railway.volume.delete
@@ -112,6 +120,11 @@ MongoDB Atlas, Hetzner, Linode, Vultr and Upstash. Rules are small YAML files:
   resource: "{volumeId}"
   severity: critical
 ```
+
+Matchers: `methods` + `path` (`{x}` one segment, `{x...}` the rest), `graphql.mutations`,
+`aws.actions` (Query `Action=` or JSON `X-Amz-Target`), and `json: { field, equals }` for calls that
+differ from routine ones only in the body — e.g. a Terraform Cloud run with `"is-destroy": true`.
+Resources can use path, GraphQL/AWS arguments, `{query.<key>}` and `{json.<dotted.path>}`.
 
 Every builtin rule ships a fixture: the destructive request copied from the provider's official
 API reference, plus look-alike requests that must pass — CI fails without one. Load your own rules

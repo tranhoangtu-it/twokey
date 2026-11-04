@@ -1,0 +1,9 @@
+# source: https://docs.aws.amazon.com/aws-backup/latest/devguide/API_DeleteBackupVault.html
+# resource: prod-vault
+DELETE https://backup.us-east-1.amazonaws.com/backup-vaults/prod-vault
+###
+# safe: reading the same vault
+GET https://backup.us-east-1.amazonaws.com/backup-vaults/prod-vault
+###
+# safe: deleting the vault's access policy leaves the vault and its backups
+DELETE https://backup.us-east-1.amazonaws.com/backup-vaults/prod-vault/access-policy

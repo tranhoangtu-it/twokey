@@ -1,0 +1,14 @@
+# source: https://docs.gitlab.com/api/environments/#delete-an-environment
+# resource: acme/api:12
+DELETE https://gitlab.com/api/v4/projects/acme%2Fapi/environments/12
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: reading the same environment
+GET https://gitlab.com/api/v4/projects/acme%2Fapi/environments/12
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: stopping an environment keeps it
+POST https://gitlab.com/api/v4/projects/acme%2Fapi/environments/12/stop
+PRIVATE-TOKEN: TOKEN

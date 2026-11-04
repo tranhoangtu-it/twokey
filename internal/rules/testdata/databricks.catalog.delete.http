@@ -1,0 +1,17 @@
+# source: https://docs.databricks.com/api/workspace/catalogs/delete
+# resource: prod_catalog
+DELETE https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.1/unity-catalog/catalogs/prod_catalog?force=true
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: reading the same catalog
+GET https://dbc-a1b2c3d4-e5f6.cloud.databricks.com/api/2.1/unity-catalog/catalogs/prod_catalog
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: updating the catalog comment
+PATCH https://adb-1234567890123456.7.azuredatabricks.net/api/2.1/unity-catalog/catalogs/prod_catalog
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"comment":"production data"}

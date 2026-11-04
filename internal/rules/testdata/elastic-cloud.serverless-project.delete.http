@@ -1,0 +1,17 @@
+# source: https://www.elastic.co/docs/api/doc/elastic-cloud-serverless/operation/operation-deleteelasticsearchproject
+# resource: elasticsearch/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+DELETE https://api.elastic-cloud.com/api/v1/serverless/projects/elasticsearch/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+Authorization: ApiKey $EC_API_KEY
+
+###
+# safe: reading the same project
+GET https://api.elastic-cloud.com/api/v1/serverless/projects/elasticsearch/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+Authorization: ApiKey $EC_API_KEY
+
+###
+# safe: renaming the project
+PATCH https://api.elastic-cloud.com/api/v1/serverless/projects/elasticsearch/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d
+Content-Type: application/json
+Authorization: ApiKey $EC_API_KEY
+
+{"name":"search-prod"}

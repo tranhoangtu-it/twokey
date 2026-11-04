@@ -1,0 +1,22 @@
+# source: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/run#create-a-run
+# resource: ws-LLGHCr4SWy28wyGN
+POST https://app.terraform.io/api/v2/runs
+Authorization: Bearer $TOKEN
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"runs","attributes":{"is-destroy":true,"message":"Tear down"},"relationships":{"workspace":{"data":{"type":"workspaces","id":"ws-LLGHCr4SWy28wyGN"}}}}}
+###
+# safe: a normal plan/apply run
+POST https://app.terraform.io/api/v2/runs
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"runs","attributes":{"message":"Custom message"},"relationships":{"workspace":{"data":{"type":"workspaces","id":"ws-LLGHCr4SWy28wyGN"}}}}}
+###
+# safe: an explicit is-destroy=false run
+POST https://app.terraform.io/api/v2/runs
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"runs","attributes":{"is-destroy":false},"relationships":{"workspace":{"data":{"type":"workspaces","id":"ws-LLGHCr4SWy28wyGN"}}}}}
+###
+# safe: reading the run list
+GET https://app.terraform.io/api/v2/workspaces/ws-LLGHCr4SWy28wyGN/runs

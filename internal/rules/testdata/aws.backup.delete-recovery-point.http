@@ -1,0 +1,9 @@
+# source: https://docs.aws.amazon.com/aws-backup/latest/devguide/API_DeleteRecoveryPoint.html
+# resource: prod-vault/arn:aws:backup:us-east-1:123456789012:recovery-point:1EB3B5E7-9EB0-435A-A80B-108B488B0D45
+DELETE https://backup.us-east-1.amazonaws.com/backup-vaults/prod-vault/recovery-points/arn:aws:backup:us-east-1:123456789012:recovery-point:1EB3B5E7-9EB0-435A-A80B-108B488B0D45
+###
+# safe: reading the same recovery point
+GET https://backup.us-east-1.amazonaws.com/backup-vaults/prod-vault/recovery-points/arn:aws:backup:us-east-1:123456789012:recovery-point:1EB3B5E7-9EB0-435A-A80B-108B488B0D45
+###
+# safe: listing recovery points in the vault
+GET https://backup.us-east-1.amazonaws.com/backup-vaults/prod-vault/recovery-points/

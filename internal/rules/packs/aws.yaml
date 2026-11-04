@@ -82,3 +82,57 @@ rules:
     resource: "{cluster}"
     severity: critical
     message: Deletes an EKS cluster.
+  - id: aws.efs.delete-file-system
+    hosts: ["elasticfilesystem.*.amazonaws.com", "elasticfilesystem-fips.*.amazonaws.com", "elasticfilesystem.*.api.aws"]
+    methods: [DELETE]
+    path: /{version}/file-systems/{filesystem}
+    resource: "{filesystem}"
+    severity: critical
+    message: Deletes an EFS file system and all of its files.
+  - id: aws.elasticache.delete
+    hosts: ["elasticache.*.amazonaws.com", "elasticache-fips.*.amazonaws.com", "elasticache.*.api.aws"]
+    aws: { actions: [DeleteCacheCluster, DeleteReplicationGroup, DeleteServerlessCache] }
+    resource: "{CacheClusterId|ReplicationGroupId|ServerlessCacheName}"
+    severity: critical
+    message: Deletes an ElastiCache cluster, replication group or serverless cache. Check for a final snapshot before approving.
+  - id: aws.redshift.delete-cluster
+    hosts: ["redshift.*.amazonaws.com", "redshift-fips.*.amazonaws.com", "redshift.*.api.aws"]
+    aws: { actions: [DeleteCluster] }
+    resource: "{ClusterIdentifier}"
+    severity: critical
+    message: Deletes a Redshift cluster. Check SkipFinalClusterSnapshot before approving.
+  - id: aws.redshift-serverless.delete
+    hosts: ["redshift-serverless.*.amazonaws.com", "redshift-serverless-fips.*.amazonaws.com", "redshift-serverless.*.api.aws"]
+    aws: { actions: [DeleteNamespace, DeleteWorkgroup] }
+    resource: "{namespaceName|workgroupName}"
+    severity: critical
+    message: Deletes a Redshift Serverless namespace (its databases) or workgroup.
+  - id: aws.opensearch.delete-domain
+    # {api} is "opensearch" (2021-01-01 API) or "es" (legacy Elasticsearch API).
+    hosts: ["es.*.amazonaws.com", "es-fips.*.amazonaws.com", "es.*.api.aws"]
+    methods: [DELETE]
+    path: /{version}/{api}/domain/{domain}
+    resource: "{domain}"
+    severity: critical
+    message: Deletes an OpenSearch Service domain and all of its data.
+  - id: aws.kms.schedule-key-deletion
+    hosts: ["kms.*.amazonaws.com", "kms-fips.*.amazonaws.com", "kms.*.api.aws"]
+    aws: { actions: [ScheduleKeyDeletion] }
+    resource: "{KeyId}"
+    severity: critical
+    message: Schedules a KMS key for deletion; data encrypted under it becomes unrecoverable.
+  - id: aws.backup.delete-recovery-point
+    # Recovery point ARNs can contain "/" (e.g. EBS snapshot ARNs), hence {arn...}.
+    hosts: ["backup.*.amazonaws.com", "backup-fips.*.amazonaws.com", "backup.*.api.aws"]
+    methods: [DELETE]
+    path: /backup-vaults/{vault}/recovery-points/{arn...}
+    resource: "{vault}/{arn}"
+    severity: critical
+    message: Deletes an AWS Backup recovery point (a backup).
+  - id: aws.backup.delete-vault
+    hosts: ["backup.*.amazonaws.com", "backup-fips.*.amazonaws.com", "backup.*.api.aws"]
+    methods: [DELETE]
+    path: /backup-vaults/{vault}
+    resource: "{vault}"
+    severity: high
+    message: Deletes an AWS Backup vault (only succeeds when it is empty).

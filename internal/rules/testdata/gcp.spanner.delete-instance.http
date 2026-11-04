@@ -1,0 +1,9 @@
+# source: https://docs.cloud.google.com/spanner/docs/reference/rest/v1/projects.instances/delete
+# resource: my-project/prod-spanner
+DELETE https://spanner.googleapis.com/v1/projects/my-project/instances/prod-spanner
+###
+# safe: reading the same instance
+GET https://spanner.googleapis.com/v1/projects/my-project/instances/prod-spanner
+###
+# safe: listing the instance's databases
+GET https://spanner.googleapis.com/v1/projects/my-project/instances/prod-spanner/databases

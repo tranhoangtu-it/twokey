@@ -1,0 +1,14 @@
+# source: https://docs.gitlab.com/api/groups/#schedule-a-group-for-deletion
+# resource: acme
+DELETE https://gitlab.com/api/v4/groups/acme
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: reading the same group
+GET https://gitlab.com/api/v4/groups/acme
+PRIVATE-TOKEN: TOKEN
+
+###
+# safe: archiving keeps the group
+POST https://gitlab.com/api/v4/groups/acme/archive
+PRIVATE-TOKEN: TOKEN

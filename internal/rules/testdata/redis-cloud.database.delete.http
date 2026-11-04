@@ -1,0 +1,25 @@
+# source: https://redis.io/docs/latest/operate/rc/api/api-reference#tag/Databases-Pro/operation/deleteDatabaseById
+# resource: 123456/51
+DELETE https://api.redislabs.com/v1/subscriptions/123456/databases/51
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: reading the same database
+GET https://api.redislabs.com/v1/subscriptions/123456/databases/51
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+###
+# safe: updating the database
+PUT https://api.redislabs.com/v1/subscriptions/123456/databases/51
+Content-Type: application/json
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY
+
+{"datasetSizeInGb":2}
+###
+# safe: deleting only a database tag
+DELETE https://api.redislabs.com/v1/subscriptions/123456/databases/51/tags/env
+x-api-key: $REDIS_ACCOUNT_KEY
+x-api-secret-key: $REDIS_SECRET_KEY

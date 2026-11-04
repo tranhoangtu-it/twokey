@@ -1,0 +1,26 @@
+# source: https://developer.hashicorp.com/terraform/cloud-docs/api-docs/organizations#destroy-an-organization
+# resource: my-organization
+DELETE https://app.terraform.io/api/v2/organizations/my-organization
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+###
+# safe: reading the same organization
+GET https://app.terraform.io/api/v2/organizations/my-organization
+Authorization: Bearer TOKEN
+
+###
+# safe: updating organization settings
+PATCH https://app.terraform.io/api/v2/organizations/my-organization
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"organizations","attributes":{"email":"admin@example.com"}}}
+
+###
+# safe: a destroy run is not detected yet (body-field match unsupported); a plain run must pass
+POST https://app.terraform.io/api/v2/runs
+Authorization: Bearer TOKEN
+Content-Type: application/vnd.api+json
+
+{"data":{"type":"runs","attributes":{"message":"Plan"},"relationships":{"workspace":{"data":{"type":"workspaces","id":"ws-SihZTyXKfNXUWuUa"}}}}}

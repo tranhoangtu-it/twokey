@@ -50,3 +50,53 @@ rules:
     resource: "{project}"
     severity: critical
     message: Schedules an entire Google Cloud project for deletion.
+  - id: gcp.bigquery.delete-dataset
+    hosts: [bigquery.googleapis.com]
+    methods: [DELETE]
+    path: /bigquery/{version}/projects/{project}/datasets/{dataset}
+    resource: "{project}/{dataset}"
+    severity: critical
+    message: Deletes a BigQuery dataset (and every table in it when deleteContents=true).
+  - id: gcp.bigquery.delete-table
+    hosts: [bigquery.googleapis.com]
+    methods: [DELETE]
+    path: /bigquery/{version}/projects/{project}/datasets/{dataset}/tables/{table}
+    resource: "{project}/{dataset}/{table}"
+    severity: critical
+    message: Deletes a BigQuery table and its data.
+  - id: gcp.firestore.delete-database
+    hosts: [firestore.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/databases/{database}
+    resource: "{project}/{database}"
+    severity: critical
+    message: Deletes a Firestore database and all of its documents.
+  - id: gcp.spanner.delete-instance
+    hosts: [spanner.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/instances/{instance}
+    resource: "{project}/{instance}"
+    severity: critical
+    message: Deletes a Spanner instance and all of its databases.
+  - id: gcp.spanner.drop-database
+    hosts: [spanner.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/instances/{instance}/databases/{database}
+    resource: "{project}/{instance}/{database}"
+    severity: critical
+    message: Drops a Spanner database and its data.
+  - id: gcp.gke.delete-cluster
+    # {scope} is "locations" (current API) or "zones" (legacy projects.zones.clusters).
+    hosts: [container.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/{scope}/{location}/clusters/{cluster}
+    resource: "{project}/{location}/{cluster}"
+    severity: critical
+    message: Deletes a GKE cluster and its workloads.
+  - id: gcp.redis.delete-instance
+    hosts: [redis.googleapis.com]
+    methods: [DELETE]
+    path: /{version}/projects/{project}/locations/{location}/instances/{instance}
+    resource: "{project}/{location}/{instance}"
+    severity: critical
+    message: Deletes a Memorystore for Redis instance and its data.

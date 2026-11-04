@@ -1,0 +1,17 @@
+# source: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/#api-repositories-workspace-repo-slug-refs-branches-name-delete
+# resource: acme/prod-api:feature/login
+DELETE https://api.bitbucket.org/2.0/repositories/acme/prod-api/refs/branches/feature/login
+Authorization: Bearer TOKEN
+
+###
+# safe: reading the same branch
+GET https://api.bitbucket.org/2.0/repositories/acme/prod-api/refs/branches/feature/login
+Authorization: Bearer TOKEN
+
+###
+# safe: creating a branch
+POST https://api.bitbucket.org/2.0/repositories/acme/prod-api/refs/branches
+Authorization: Bearer TOKEN
+Content-Type: application/json
+
+{"name":"feature/login","target":{"hash":"main"}}

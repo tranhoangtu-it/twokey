@@ -1,0 +1,18 @@
+# source: https://docs.pinecone.io/reference/api/latest/control-plane/delete_collection
+# resource: example-collection
+DELETE https://api.pinecone.io/collections/example-collection
+Api-Key: $PINECONE_API_KEY
+X-Pinecone-Api-Version: 2026-07
+
+###
+# safe: describing the same collection
+GET https://api.pinecone.io/collections/example-collection
+Api-Key: $PINECONE_API_KEY
+
+###
+# safe: creating a collection
+POST https://api.pinecone.io/collections
+Content-Type: application/json
+Api-Key: $PINECONE_API_KEY
+
+{"name":"example-collection-2","source":"prod-embeddings"}

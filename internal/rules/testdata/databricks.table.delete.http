@@ -1,0 +1,17 @@
+# source: https://docs.databricks.com/api/workspace/tables/delete
+# resource: prod_catalog.sales.orders
+DELETE https://1234567890123456.7.gcp.databricks.com/api/2.1/unity-catalog/tables/prod_catalog.sales.orders
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: reading the same table
+GET https://1234567890123456.7.gcp.databricks.com/api/2.1/unity-catalog/tables/prod_catalog.sales.orders
+Authorization: Bearer $DATABRICKS_TOKEN
+
+###
+# safe: changing the table owner
+PATCH https://1234567890123456.7.gcp.databricks.com/api/2.1/unity-catalog/tables/prod_catalog.sales.orders
+Content-Type: application/json
+Authorization: Bearer $DATABRICKS_TOKEN
+
+{"owner":"data-eng"}

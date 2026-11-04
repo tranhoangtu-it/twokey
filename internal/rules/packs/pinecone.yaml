@@ -1,0 +1,17 @@
+provider: pinecone
+docs: https://docs.pinecone.io/reference/api/introduction
+rules:
+  - id: pinecone.index.delete
+    hosts: [api.pinecone.io]
+    methods: [DELETE]
+    path: /indexes/{index}
+    resource: "{index}"
+    severity: critical
+    message: Deletes a Pinecone index and all of its vectors.
+  - id: pinecone.collection.delete
+    hosts: [api.pinecone.io]
+    methods: [DELETE]
+    path: /collections/{collection}
+    resource: "{collection}"
+    severity: critical
+    message: Deletes a Pinecone collection (a static copy of an index's data).

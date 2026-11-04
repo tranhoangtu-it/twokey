@@ -1,0 +1,17 @@
+# source: https://clickhouse.com/docs/products/cloud/api-reference/service/delete-service
+# resource: 3fa85f64-5717-4562-b3fc-2c963f66afa6/7c9e6679-7425-40de-944b-e07fc1f90ae7
+DELETE https://api.clickhouse.cloud/v1/organizations/3fa85f64-5717-4562-b3fc-2c963f66afa6/services/7c9e6679-7425-40de-944b-e07fc1f90ae7
+Authorization: Basic $CLICKHOUSE_KEY
+
+###
+# safe: reading the same service
+GET https://api.clickhouse.cloud/v1/organizations/3fa85f64-5717-4562-b3fc-2c963f66afa6/services/7c9e6679-7425-40de-944b-e07fc1f90ae7
+Authorization: Basic $CLICKHOUSE_KEY
+
+###
+# safe: stopping the service (data is kept)
+PATCH https://api.clickhouse.cloud/v1/organizations/3fa85f64-5717-4562-b3fc-2c963f66afa6/services/7c9e6679-7425-40de-944b-e07fc1f90ae7/state
+Content-Type: application/json
+Authorization: Basic $CLICKHOUSE_KEY
+
+{"command":"stop"}
