@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tranhoangtu-it/twokey/internal/ca"
 	"github.com/tranhoangtu-it/twokey/internal/proxy"
 	"github.com/tranhoangtu-it/twokey/internal/runenv"
 )
@@ -33,6 +34,7 @@ func cmdUp(args []string) error {
 	phone := fs.Bool("phone", false, "also approve from your phone (see `twokey phone`)")
 	ntfyTopic := fs.String("ntfy-topic", os.Getenv("TWOKEY_NTFY_TOPIC"), "explicit ntfy topic (default: the one from `twokey phone`)")
 	ntfyServer := fs.String("ntfy-server", envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"), "ntfy server URL")
+	allow := fs.String("allow", "", "pre-approved operations file (default ./"+defaultAllowFile+" if present)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -40,7 +42,7 @@ func cmdUp(args []string) error {
 	defer stop()
 	p, err := startProxy(ctx, proxyConfig{
 		addr: *addr, timeout: *timeout, rulesDir: *rulesDir, phone: *phone,
-		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr,
+		ntfyTopic: *ntfyTopic, ntfyServer: *ntfyServer, terminal: true, logTo: os.Stderr, allowFile: *allow,
 	})
 	if err != nil {
 		return err
@@ -84,6 +86,16 @@ func agentEnv(addr string) ([]runenv.KV, error) {
 	}
 	cfg := runenv.Config{ProxyURL: "http://" + addr, CACert: a.CertPath(), Bundle: bundle}
 	vars := runenv.Vars(cfg)
+	trustStore := ""
+	if bundle != "" {
+		if ts, err := a.WriteJavaTrustStore(bundle); err == nil {
+			trustStore = ts
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: Java truststore not written (%v); JVM tools may reject intercepted hosts\n", err)
+		}
+	}
+	vars = append(vars, runenv.KV{Key: "JAVA_TOOL_OPTIONS", Value: runenv.JavaToolOptions(
+		addr, trustStore, ca.JavaTrustStorePassword, os.Getenv("JAVA_TOOL_OPTIONS"))})
 	if runtime.GOOS == "windows" {
 		if dir, err := curlHome(a.Dir()); err == nil {
 			vars = append(vars, runenv.KV{Key: "CURL_HOME", Value: dir})
@@ -142,6 +154,7 @@ func cmdRun(args []string) error {
 	phone := fs.Bool("phone", false, "one-terminal mode: start the proxy in-process, approve on your phone")
 	timeout := fs.Duration("timeout", 2*time.Minute, "with --phone: deny holds nobody answers within this time")
 	rulesDir := fs.String("rules", "", "with --phone: extra rule pack directory")
+	allow := fs.String("allow", "", "with --phone: pre-approved operations file (default ./"+defaultAllowFile+")")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -170,6 +183,7 @@ func cmdRun(args []string) error {
 			addr: "127.0.0.1:0", timeout: *timeout, rulesDir: *rulesDir, phone: true,
 			ntfyTopic: os.Getenv("TWOKEY_NTFY_TOPIC"), ntfyServer: envOr("TWOKEY_NTFY_SERVER", "https://ntfy.sh"),
 			logTo: logFile, // keep diagnostics out of the agent's TUI
+			allowFile: *allow,
 		})
 		if err != nil {
 			return setupFailure(err)
@@ -299,6 +313,11 @@ func cmdDoctor(args []string) error {
 			"Go uses the OS trust store on Windows/macOS: run `twokey ca trust`"},
 	}
 	failed := 0
+	if javaProbe, err := writeJavaProbe(); err == nil {
+		defer os.RemoveAll(filepath.Dir(javaProbe))
+		probes = append(probes, probe{"java (JVM SDKs)", []string{"java"}, []string{javaProbe},
+			"needs Java 11+; twokey sets JAVA_TOOL_OPTIONS (proxy + truststore)"})
+	}
 	for _, p := range probes {
 		ok, detail := runProbe(p, env)
 		switch {
@@ -316,6 +335,32 @@ func cmdDoctor(args []string) error {
 	}
 	fmt.Println("\nAll set. Try it: twokey replay pocketos --live")
 	return nil
+}
+
+// javaProbeSource uses HttpURLConnection, which honors the proxy system
+// properties set through JAVA_TOOL_OPTIONS.
+const javaProbeSource = `public class Probe {
+  public static void main(String[] a) throws Exception {
+    var c = (java.net.HttpURLConnection) new java.net.URL("` + probeURL + `").openConnection();
+    c.setConnectTimeout(20000); c.setReadTimeout(20000);
+    System.out.println("x-twokey: " + c.getHeaderField("X-Twokey"));
+  }
+}
+`
+
+// writeJavaProbe writes the probe to a fresh temp dir (single-file source
+// launch, Java 11+).
+func writeJavaProbe() (string, error) {
+	dir, err := os.MkdirTemp("", "twokey-doctor-")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "Probe.java")
+	if err := os.WriteFile(path, []byte(javaProbeSource), 0o600); err != nil {
+		os.RemoveAll(dir)
+		return "", err
+	}
+	return path, nil
 }
 
 func runProbe(p probe, env []string) (bool, string) {

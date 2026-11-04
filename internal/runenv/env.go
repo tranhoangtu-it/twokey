@@ -76,6 +76,32 @@ func Apply(base []string, vars []KV) []string {
 	return out
 }
 
+// JavaToolOptions returns JAVA_TOOL_OPTIONS routing the JVM through the
+// proxy with twokey's truststore, appended to any existing options.
+// (HttpURLConnection and SDKs that honor the proxy system properties.)
+func JavaToolOptions(proxyHostPort, trustStore, password, existing string) string {
+	host, port, ok := strings.Cut(proxyHostPort, ":")
+	if !ok {
+		return existing
+	}
+	opts := []string{
+		"-Dhttps.proxyHost=" + host, "-Dhttps.proxyPort=" + port,
+		"-Dhttp.proxyHost=" + host, "-Dhttp.proxyPort=" + port,
+		"-Dhttp.nonProxyHosts=localhost|127.0.0.1|[::1]",
+	}
+	if trustStore != "" {
+		opts = append(opts,
+			"-Djavax.net.ssl.trustStore="+trustStore,
+			"-Djavax.net.ssl.trustStoreType=PKCS12",
+			"-Djavax.net.ssl.trustStorePassword="+password)
+	}
+	joined := strings.Join(opts, " ")
+	if existing = strings.TrimSpace(existing); existing != "" {
+		return existing + " " + joined
+	}
+	return joined
+}
+
 // Lookup returns the value of key in env (case-insensitive), or "".
 func Lookup(env []string, key string) string {
 	for _, e := range env {

@@ -40,6 +40,19 @@ func TestApprovalSecretsNeverReachTheAgent(t *testing.T) {
 	}
 }
 
+func TestJavaToolOptions(t *testing.T) {
+	got := JavaToolOptions("127.0.0.1:7171", "/h/truststore.p12", "changeit", " -Xmx1g ")
+	for _, want := range []string{"-Xmx1g ", "-Dhttps.proxyHost=127.0.0.1", "-Dhttps.proxyPort=7171",
+		"-Djavax.net.ssl.trustStore=/h/truststore.p12", "-Djavax.net.ssl.trustStoreType=PKCS12"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	if strings.Contains(JavaToolOptions("127.0.0.1:7171", "", "x", ""), "trustStore") {
+		t.Error("no truststore option without a truststore")
+	}
+}
+
 func TestVarsWithoutBundleSkipsReplacingTrustStores(t *testing.T) {
 	for _, kv := range Vars(Config{ProxyURL: "http://x", CACert: "/ca.pem"}) {
 		if kv.Key == "SSL_CERT_FILE" {

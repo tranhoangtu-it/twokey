@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -24,20 +25,34 @@ import (
 	"github.com/tranhoangtu-it/twokey/internal/rules"
 )
 
-const version = "0.1.0"
+// version is set at release time (-ldflags "-X main.version=..."); for
+// `go install …@vX.Y.Z` it is read from the module build info instead.
+var version = "dev"
+
+func init() {
+	if version != "dev" {
+		return
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		version = strings.TrimPrefix(bi.Main.Version, "v")
+	}
+}
+
+func printUsage() { fmt.Print(strings.Replace(usage, "VERSION", version, 1)) }
 
 const defaultAddr = "127.0.0.1:7171"
 
 // errHeld is returned by `explain` when the request would be held (exit 2).
 var errHeld = errors.New("held")
 
-const usage = `twokey ` + version + ` — make your AI agent ask a human before it deletes prod
+const usage = `twokey VERSION — make your AI agent ask a human before it deletes prod
 
 Usage:
   twokey replay pocketos                               see what twokey does, in 5 seconds
   twokey up [--phone] [--timeout 2m]                   start the proxy + approval prompt
   twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
   twokey phone [--rotate]                              set up approvals on your phone (ntfy)
+  twokey pg --upstream HOST:5432 [--upstream-tls]      guard a Postgres database (DROP, TRUNCATE, …)
   twokey env [--shell sh|powershell]                   print the variables 'run' sets
   twokey doctor [--addr A]                             check curl/python/node/go are covered
   twokey replay <scenario> [--live]                    replay a real-world incident
@@ -77,7 +92,7 @@ func (e exitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) 
 
 func dispatch(args []string) error {
 	if len(args) == 0 {
-		fmt.Print(usage)
+		printUsage()
 		return nil
 	}
 	cmd, rest := args[0], args[1:]
@@ -98,13 +113,15 @@ func dispatch(args []string) error {
 		return cmdRules(rest)
 	case "ca":
 		return cmdCA(rest)
+	case "pg":
+		return cmdPG(rest)
 	case "phone":
 		return cmdPhone(rest)
 	case "version", "--version", "-v":
 		fmt.Println("twokey", version)
 		return nil
 	case "help", "--help", "-h":
-		fmt.Print(usage)
+		printUsage()
 		return nil
 	case probeCommand:
 		return cmdProbe(rest)
