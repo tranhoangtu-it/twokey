@@ -132,7 +132,12 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 			Allow: allow.allows,
 		}),
 		ReadHeaderTimeout: 30 * time.Second,
-		ErrorLog:          logger,
+		// Idle keep-alive connections from agents are closed; hijacked
+		// CONNECT tunnels have their own idle timeout in internal/proxy and
+		// end with the process on shutdown.
+		IdleTimeout:    2 * time.Minute,
+		MaxHeaderBytes: 1 << 20, // same cap as intercepted request heads
+		ErrorLog:       logger,
 	}
 	p := &runningProxy{addr: ln.Addr().String(), done: make(chan error, 1)}
 	go func() {
