@@ -49,6 +49,7 @@ const usage = `twokey VERSION — make your AI agent ask a human before it delet
 
 Usage:
   twokey replay pocketos                               see what twokey does, in 5 seconds
+  twokey setup [--yes] [--trust]                       one-time setup: CA, phone, runtime check
   twokey up [--phone] [--timeout 2m] [--observe]       start the proxy + approval prompt
   twokey run [--phone] -- <agent> [args...]            run an agent routed through twokey
   twokey run --observe -- <agent> [args...]            trial: log what would be held, hold nothing
@@ -122,6 +123,8 @@ func dispatch(args []string) error {
 		return cmdUninstall(rest)
 	case "log":
 		return cmdLog(rest)
+	case "setup":
+		return cmdSetup(rest)
 	case "mysql":
 		return cmdMySQL(rest)
 	case "pg":

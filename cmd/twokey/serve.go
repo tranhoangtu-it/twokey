@@ -209,7 +209,11 @@ func cmdRun(args []string) error {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = runenv.Apply(os.Environ(), vars)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — destructive cloud API calls need your approval\n", argv[0], proxyAddr)
+	if *observe {
+		fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — OBSERVE MODE: destructive calls are logged, NOT held\n", argv[0], proxyAddr)
+	} else {
+		fmt.Fprintf(os.Stderr, "twokey: %s is routed through http://%s — destructive cloud API calls need your approval\n", argv[0], proxyAddr)
+	}
 
 	// Ctrl+C belongs to the agent; twokey just waits for it to exit.
 	signal.Notify(make(chan os.Signal, 1), os.Interrupt)

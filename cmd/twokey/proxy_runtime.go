@@ -132,13 +132,20 @@ func startProxy(ctx context.Context, c proxyConfig) (*runningProxy, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "  rules    %d destructive operations across %d providers (only those hosts are inspected)\n", len(rules), len(providers))
+	label := "approve"
+	if c.observe {
+		label = "mode"
+	}
 	for _, ch := range channels {
-		fmt.Fprintf(&b, "  approve  %s\n", ch)
+		fmt.Fprintf(&b, "  %-8s %s\n", label, ch)
 	}
 	if len(allows) > 0 {
 		fmt.Fprintf(&b, "  allow    %d pre-approved operation(s) from %s\n", len(allows), allowPath)
 	}
-	fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n  audit    %s\n", c.timeout, auditPath)
+	if !c.observe {
+		fmt.Fprintf(&b, "  timeout  unanswered holds are denied after %s\n", c.timeout)
+	}
+	fmt.Fprintf(&b, "  audit    %s\n", auditPath)
 	p.summary = b.String()
 	return p, nil
 }
