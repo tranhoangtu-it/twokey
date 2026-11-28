@@ -4,6 +4,8 @@
 [![release](https://img.shields.io/github/v/release/tranhoangtu-it/twokey)](https://github.com/tranhoangtu-it/twokey/releases/latest)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+![twokey quickstart demo](assets/quickstart-demo.svg)
+
 **A two-person rule for AI agents.** A local proxy that holds destructive cloud API calls
 (`volumeDelete`, `DeleteDBInstance`, `DELETE /repos/…`) until a human approves them — in another
 window or on your phone. Built for accidents: an agent can't approve its own request by mistake.
